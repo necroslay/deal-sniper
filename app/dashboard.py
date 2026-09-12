@@ -85,7 +85,7 @@ scrape_source = st.sidebar.selectbox("Source", ["all", "kijiji", "craigslist"],
 scrape_pages = st.sidebar.number_input("Pages (0 = use config)", min_value=0,
                                        max_value=20, value=0, key="scrape_pages")
 
-if st.sidebar.button("▶  Run scrape now", use_container_width=True,
+if st.sidebar.button("▶  Run scrape now", width="stretch",
                      type="primary", key="run_scrape"):
     with st.spinner(f"Scraping {scrape_source}… this can take a minute"):
         code, output = run_scrape(scrape_source, scrape_pages or None, DB_PATH)
@@ -150,7 +150,7 @@ hide_flagged = st.sidebar.checkbox("Hide accessories / lots", value=True)
 include_gone = st.sidebar.checkbox("Include gone listings", value=True)
 
 st.sidebar.divider()
-if st.sidebar.button("🔄 Refresh data", use_container_width=True):
+if st.sidebar.button("🔄 Refresh data", width="stretch"):
     load_listings.clear()
     st.rerun()
 
@@ -214,7 +214,7 @@ table = view[[
 
 st.dataframe(
     table,
-    use_container_width=True,
+    width="stretch",
     hide_index=True,
     height=520,
     column_config={
