@@ -96,11 +96,12 @@ app/
 |   +-- lifecycle.py          # Inferred comps from listing disappearance
 +-- models/schema.py          # Pydantic v2 models
 +-- pipeline/ingest.py        # Pipeline orchestrator
++-- pipeline/lifecycle_cycle.py # Observe/retire/infer cycle (shared)
 +-- valuation/
 |   +-- fair_value.py         # FMV computation
 |   +-- realize.py            # ERV computation
 |   +-- score.py              # Deal score computation
-+-- tests/ (14 files, 176 tests)
++-- tests/ (15 files, 180 tests)
 +-- config.py                 # Central config (16 sections)
 +-- main.py                   # FastAPI app (5 endpoints)
 +-- dashboard.py              # Streamlit dashboard
@@ -460,7 +461,7 @@ python -m pytest
 python -m pytest -v --tb=short  # verbose with short traceback
 ```
 
-176 tests across 14 files.
+180 tests across 15 files.
 
 ### Run specific file
 
@@ -507,7 +508,7 @@ python -m pytest tests/test_fair_value.py -v --tb=short
 
 ### Smoke test checklist
 
-- [ ] `python -m pytest` -- all 176 tests pass
+- [ ] `python -m pytest` -- all 180 tests pass
 - [ ] `python -c "from app.main import app"` -- app loads
 - [ ] POST /valuate with timezone-aware comps returns FMV > 0
 - [ ] POST /health returns healthy

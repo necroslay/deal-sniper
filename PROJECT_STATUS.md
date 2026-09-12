@@ -79,7 +79,7 @@ ALERT_IMMEDIATE     0    (0%)
 
 ```bash
 # Unit tests (no network)
-cd app && python -m pytest -q                        # 176 passed
+cd app && python -m pytest -q                        # 180 passed
 cd craigslist-scraper && python -m pytest tests -q   # 39 passed
 
 # Full pipeline: seed comps -> scrape live -> value -> persist -> report
@@ -247,9 +247,11 @@ known next steps, not mysteries.
    Postgres target, but `run_full_pipeline.py` and `db/store.py` use SQLite. The
    Postgres path is aspirational, not exercised.
 
-4. **Celery is not wired.** The task functions and `BEAT_SCHEDULE` exist, but each
-   task body logs `"... not yet wired — noop"`. There is no `@celery.task`
-   decorator and no `celery_app`. Scheduling today = running a script by hand.
+4. **Celery is not wired.** There is no `@celery.task` decorator and no
+   `celery_app`, so `BEAT_SCHEDULE` cannot fire. `refresh_comps` is now a real
+   implementation (it builds inferred comps from retired listings), but
+   `scrape_and_ingest` and `cleanup_stale_data` remain documented no-ops.
+   Scheduling today = running a script by hand.
 
 5. **Comps are synthetic or inferred — not observed sold data.** No eBay *sold*
    data has ever been ingested, and §5 shows why: it is gated. What exists today

@@ -28,17 +28,39 @@ def scrape_and_ingest(source: str, query: str, **kwargs):
     logger.warning("Celery tasks not yet wired — noop")
 
 
-def refresh_comps(standard_name: str, condition: Optional[str] = None):
-    """
-    Celery task: refresh sold comps for a canonical product.
+def refresh_comps(standard_name: Optional[str] = None,
+                  condition: Optional[str] = None):
+    """Refresh comps from retired (presumed-sold) listings.
+
+    There is no reachable *free* source of real sold comps (see
+    ``PROJECT_STATUS.md`` §5), so the refresh available today is the lifecycle
+    inference: listings that disappeared are converted into inferred comps and
+    stored. Inferred comps remain excluded from valuation unless
+    ``lifecycle.use_inferred_comps`` is enabled.
 
     Args:
-        standard_name: Canonical product name (e.g. "RTX 4090")
-        condition: Optional condition grade filter
+        standard_name: Retained for a future real-comp source. Currently advisory
+            only — inference operates over whatever has been retired.
+        condition: Optional condition grade filter (also currently advisory).
+
+    Returns:
+        ``{"inferred_built": n, "inferred_added": n}``.
     """
+    from app.db.store import Store
+    from app.pipeline.lifecycle_cycle import refresh_inferred_comps
+
     logger.info(f"Task: refresh_comps(standard_name='{standard_name}', condition={condition})")
-    # TODO: eBay sold scraper → comp_engine → store in DB
-    logger.warning("Comp refresh task not yet wired — noop")
+    store = Store()
+    store.connect()
+    try:
+        summary = refresh_inferred_comps(store)
+        logger.info(f"Comp refresh complete: {summary}")
+        return summary
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.error(f"Comp refresh failed: {exc}")
+        return {"inferred_built": 0, "inferred_added": 0}
+    finally:
+        store.close()
 
 
 def cleanup_stale_data(max_age_days: int = 90):

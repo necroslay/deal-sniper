@@ -15,7 +15,7 @@ from app.models.schema import Platform, SoldComp
 from app.pipeline.ingest import IngestionPipeline
 from app.db.store import Store
 from app.config import CFG
-from app.engines.lifecycle import build_inferred_comps
+from app.pipeline.lifecycle_cycle import observe_cycle
 from datetime import datetime, timezone, timedelta
 from collections import Counter
 
@@ -122,21 +122,13 @@ for i, raw in enumerate(listings):
 # miss, and enough consecutive misses retires it (presumed sold). Only sources
 # that actually returned listings are considered, so a source that errored or
 # returned nothing can't retire its whole inventory.
-seen_keys = {(r.raw_listing.source.value, r.raw_listing.source_listing_id)
-             for r in results}
-scraped_sources = {r.raw_listing.source for r in results}
+scraped_sources = {l.source for l in listings}
 if scraped_sources:
-    cycle = store.close_observation_cycle(seen_keys=seen_keys,
-                                          sources=scraped_sources)
+    cycle = observe_cycle(store, listings, sources=scraped_sources)
     print(f"  Lifecycle: {cycle['missed']} missed this cycle, "
           f"{cycle['gone']} newly retired")
-
-    # Turn disappeared listings into inferred comps. Harmless to store even when
-    # unused: get_sold_comps() excludes inferred rows unless explicitly asked.
-    gone_rows = store.get_gone_listings(since_days=CFG.lifecycle.inference_window_days)
-    inferred = build_inferred_comps(gone_rows)
-    added = sum(1 for c in inferred if store.insert_sold_comp(c))
-    print(f"  Inferred comps: {len(inferred)} built, {added} new "
+    print(f"  Inferred comps: {cycle['inferred_built']} built, "
+          f"{cycle['inferred_added']} new "
           f"(haircut {CFG.lifecycle.inferred_comp_haircut_pct:.0%})")
     if not CFG.lifecycle.use_inferred_comps:
         print("  (inferred comps excluded from valuation — "

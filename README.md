@@ -49,7 +49,7 @@ keeps them separate.
 | **Live sources** | Kijiji, Craigslist |
 | **Gated (not built)** | eBay, Facebook Marketplace — both require accounts |
 | **Last verified run** | 867 listings scraped, 867 decisions scored, both sources live (2 pass the alert gate) |
-| **Tests** | 176 engine tests + 39 scraper-parser tests, all passing |
+| **Tests** | 180 engine tests + 39 scraper-parser tests, all passing |
 | **Known bottleneck** | Comp *data access* — no free source exposes real sold comps (eBay gated, PriceCharting/130point behind Cloudflare). A lifecycle "disappearance" proxy exists but is off by default |
 
 Full detail, including tech debt and honest caveats, is in
@@ -66,7 +66,7 @@ cd app
 pip install -r requirements.txt
 
 # 2. Run the test suite (no network needed)
-python -m pytest -q                      # 176 passed
+python -m pytest -q                      # 180 passed
 
 # 3. Run the full pipeline: scrape live -> value -> persist (accumulating DB)
 python run_full_pipeline.py
