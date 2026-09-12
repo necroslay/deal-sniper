@@ -11,7 +11,6 @@ import pytest
 
 from app.engines.listing_guard import assess_listing
 from app.engines.resolver import find_products, resolve_product
-from app.models.schema import Platform, RawListing
 
 
 def _product_for(title):
@@ -116,31 +115,3 @@ class TestLegitimateListingsPass:
         assert assess_listing(title, _product_for(title)) is None
 
 
-class TestPipelineIntegration:
-    """A rejected listing must produce a zero valuation."""
-
-    def test_cable_rejected_end_to_end(self, rtx_4090_sold_comps):
-        from app.pipeline.ingest import IngestionPipeline
-
-        listing = RawListing(
-            source=Platform.kijiji,
-            listing_id="cable_1",
-            title="GPU power cable, Fasgear. RTX 3090 Ti, 4080 and 4090 6+2 Male",
-            price_cad=20.0,
-            url="https://kijiji.ca/cable",
-        )
-        out = IngestionPipeline().process(raw_listing=listing, sold_comps=rtx_4090_sold_comps)
-
-        assert out.fair_value.fmv_cad == 0.0
-        assert out.deal_score.expected_profit_cad == 0.0
-        assert out.deal_score.score == 0.0
-        assert out.deal_score.risk_flags == ["accessory_or_part"]
-
-    def test_legitimate_listing_still_valuated(self, rtx_4090_listing, rtx_4090_sold_comps):
-        from app.pipeline.ingest import IngestionPipeline
-
-        out = IngestionPipeline().process(
-            raw_listing=rtx_4090_listing, sold_comps=rtx_4090_sold_comps
-        )
-        assert out.fair_value.fmv_cad > 0
-        assert out.deal_score.risk_flags != ["accessory_or_part"]

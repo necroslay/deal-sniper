@@ -11,8 +11,6 @@ _PARENT = Path(__file__).resolve().parent.parent.parent
 
 _PROJECT_DIRS = {
     "kijiji": _PARENT / "kijiji-scraper",
-    "ebay": _PARENT / "ebay-scraper",
-    "facebook": _PARENT / "facebook-marketplace-scraper",
     "craigslist": _PARENT / "craigslist-scraper",
 }
 
@@ -111,46 +109,6 @@ class KijijiAdapter(SourceAdapter):
             logger.error(f"Kijiji error: {e}"); return []
     def fetch_detail(self, url): return None
     def check_health(self): return {"status":"ok","source":"kijiji"}
-
-@register_source(Platform.ebay)
-class eBayAdapter(SourceAdapter):
-    @property
-    def platform(self): return Platform.ebay
-    def search(self, query, max_pages=5, **kwargs):
-        try:
-            mod = _import_scraper("ebay")
-            scraper = mod.eBayScraper()
-            sold = kwargs.get("sold", False)
-            listings = scraper.scrape(search_term=query, sold=sold, max_pages=max_pages)
-            return [RawListing(source=Platform.ebay, listing_id=l.listing_id or "",
-                title=l.title, price_cad=l.price_cad, url=l.url,
-                location=l.location, description=l.description,
-                date_posted=l.date_posted, image_urls=l.image_urls,
-                scraped_at=l.scraped_at) for l in listings]
-        except Exception as e:
-            logger.error(f"eBay error: {e}"); return []
-    def fetch_detail(self, url): return None
-    def check_health(self): return {"status":"ok","source":"ebay"}
-
-@register_source(Platform.facebook)
-class FacebookAdapter(SourceAdapter):
-    @property
-    def platform(self): return Platform.facebook
-    def search(self, query, max_pages=5, **kwargs):
-        try:
-            mod = _import_scraper("facebook")
-            scraper = mod.FacebookMarketplaceScraper()
-            loc = kwargs.get("location","toronto")
-            listings = scraper.scrape(search_term=query, location=loc, max_pages=max_pages)
-            return [RawListing(source=Platform.facebook, listing_id=l.listing_id or "",
-                title=l.title, price_cad=l.price_cad, url=l.url,
-                location=l.location, description=l.description,
-                date_posted=l.date_posted, image_urls=l.image_urls,
-                scraped_at=l.scraped_at) for l in listings]
-        except Exception as e:
-            logger.error(f"FB error: {e}"); return []
-    def fetch_detail(self, url): return None
-    def check_health(self): return {"status":"unknown","source":"facebook"}
 
 @register_source(Platform.craigslist)
 class CraigslistAdapter(SourceAdapter):

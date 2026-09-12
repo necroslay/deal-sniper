@@ -1,62 +1,15 @@
-# Deal Sniper — Comp-Driven Resale Valuation Engine
+# Deal Sniper — scraper + viewer
 
-A pipeline that finds underpriced second-hand hardware by valuing listings
-against **completed sales**, scoring the profit net of real costs, and alerting a
-human. Canada / CAD.
+Scrapes second-hand computer parts from **Kijiji** and **Craigslist** (GTA), stores
+them in SQLite, and shows them in a Streamlit dashboard so you can browse and
+decide what's worth chasing.
 
-It is **not** a scraper collection, **not** an autonomous buying bot, and **not**
-an AI price-guesser.
+Deliberately small: **scrape → look → decide**. No pricing model in the loop.
 
-> **New here?** Read [`PROJECT_STATUS.md`](PROJECT_STATUS.md) first — it's a
-> verified map of what works today versus what's stubbed. Then
-> [`DECISIONS.md`](DECISIONS.md) for the reasoning behind each design choice.
-
----
-
-## The core idea
-
-Most "deal finders" compare an asking price to *other asking prices*. That's
-circular — asking prices are wishes, and they're set by sellers who want more
-than the item is worth.
-
-This system instead values against **transactions that actually completed**,
-aggregates them statistically with outlier rejection, then subtracts the costs
-that turn a headline price into a real margin:
-
-```
-asking price  ──┐
-                │        ┌─ sold comps (completed transactions)
-                │        │      ↓  IQR outlier trim
-                │        │   price band (median, P25–P75)
-                │        │      ↓  × condition multiplier
-                │        └─ FMV  (fair market value)
-                │               ↓  − fees − shipping − return reserve
-                └──────→  ERV  (expected resale value, net)
-                                ↓  − travel − labor − capital lockup
-                          expected profit  →  deal score  →  alert tier
-```
-
-**Valuation ≠ deal scoring.** Working out what something is worth and deciding
-whether acting on it is worth your time are two separate problems, and this code
-keeps them separate.
-
----
-
-## Current status at a glance
-
-| | |
-|---|---|
-| **Live sources** | Kijiji, Craigslist |
-| **Gated (not built)** | eBay, Facebook Marketplace — both require accounts |
-| **Last verified run** | 867 listings scraped, 867 decisions scored, both sources live (2 pass the alert gate) |
-| **Tests** | 203 engine tests + 39 scraper-parser tests, all passing |
-| **Known bottleneck** | Comp *data access* — no free source exposes real sold comps (eBay gated, PriceCharting/130point behind Cloudflare). Two weaker fallbacks exist: a lifecycle "disappearance" proxy (off by default) and new-retail anchoring (`FMV = retail × M_condition`) |
-
-Full detail, including tech debt and honest caveats, is in
-[`PROJECT_STATUS.md`](PROJECT_STATUS.md). **Read it before presenting this
-project** — it lists the things that would otherwise be found the hard way.
-
----
+> The full comp-driven valuation engine (203 tests, FMV/ERV maths, deal scoring,
+> alert gate, lifecycle inference, retail anchoring) is preserved at git tag
+> **`full-engine-v1`**, with its documentation in
+> [`archive/engine-docs/`](archive/engine-docs/).
 
 ## Quick start
 
@@ -65,130 +18,98 @@ project** — it lists the things that would otherwise be found the hard way.
 cd app
 pip install -r requirements.txt
 
-# 2. Run the test suite (no network needed)
-python -m pytest -q                      # 203 passed
+# 2. Scrape (writes app/listings.db)
+cd ..
+python -m app.scrape                          # Kijiji + Craigslist
+python -m app.scrape --source kijiji --pages 1   # quick run
 
-# 3. Run the full pipeline: scrape live -> value -> persist (accumulating DB)
-python run_full_pipeline.py
-
-# 3b. Demo mode: synthetic comps, self-contained DB (do NOT draw conclusions)
-python run_full_pipeline.py --fresh --seed-demo
-
-# 3c. Load new-retail prices so products without sold comps can still be valued
-python -m app.tools.import_retail_prices --file retail.csv
-
-# 4. Serve the API
-uvicorn app.main:app --port 8000
+# 3. Browse
+streamlit run app/dashboard.py
 ```
 
-The Craigslist scraper needs a browser. It drives the **Chrome already installed
-on your machine** via Playwright (`channel="chrome"`), so normally nothing extra
-to install; if Playwright's package is missing, `pip install playwright`.
+Craigslist needs a browser: that scraper drives the **Chrome already installed on
+your machine** via Playwright (`channel="chrome"`), falling back to bundled
+Chromium. If Playwright's package is missing: `pip install playwright`.
 
-> The database **accumulates** by default — that is what lets the pipeline track
-> listings across runs and infer sales from disappearances. Pass `--fresh` for a
-> throwaway, self-contained run.
+## How it works
 
----
+```
+Kijiji      ─┐
+             ├─→ adapter ─→ resolve product ─→ guard flags ─→ SQLite ─→ Streamlit
+Craigslist  ─┘
+```
+
+Each listing is stored **once**, keyed on `(source, listing id)`. Repeat scrapes
+refresh `last_seen_at` instead of duplicating, and a listing that stops appearing
+is retired to `status='gone'` — which is how the dashboard can show what's new
+and what has likely sold.
+
+Two small pieces of intelligence survive, because they're what make the listing
+view usable rather than a firehose:
+
+- **Product resolution** (`engines/resolver.py`) — "EVGA GeForce RTX 3080 FTW3
+  Ultra Gaming 10GB" → `RTX 3080`, so you can filter and group by product.
+- **Listing guard** (`engines/listing_guard.py`) — flags accessories, multi-item
+  lots, and "X for PS5" listings so they don't pollute the view.
+
+## The dashboard
+
+- **Header:** total listings, active, new in 24h, median price, gone (likely sold)
+- **Filters:** source, product, title keyword, price range, posted-within,
+  hide accessories/lots, include/exclude gone listings
+- **Charts:** price distribution, listings by source, listings first-seen per day
+- **Table:** sortable, with a link to each listing, plus CSV export of the
+  current filter
+
+## Scraper details
+
+| Source | Method | Notes |
+|---|---|---|
+| **Kijiji** | Internal Apollo GraphQL endpoint (`/anvil/api`), fetched with `cloudscraper` | No browser needed. Sweeps the GPU term list in `kijiji-scraper/config.yaml`; `__NEXT_DATA__` is kept as a page-1 fallback |
+| **Craigslist** | Headless browser (Playwright) | Search pages are JS-rendered, so a plain HTTP GET returns an empty shell. Listing dates arrive in three different formats and are normalised to ISO-8601 |
+
+Each scraper is a **self-contained project** with its own config and models, so a
+markup change in one marketplace can't break the other.
+
+### Verified behaviour
+
+A single-page Kijiji sweep returns **~259 listings** and resolves them into
+products (`RTX 3080` ×27, `RTX 3070` ×18, `RTX 4090` ×14, …). Running it twice
+adds **0** new rows and refreshes **259** — deduplication and tracking work.
 
 ## Repository layout
 
 ```
 deal-sniper/
-├── app/                          # the valuation engine + API
-│   ├── engines/                  # resolver, condition, comp aggregation
-│   ├── valuation/                # FMV, ERV, deal scoring
-│   ├── pipeline/ingest.py        # end-to-end orchestration
-│   ├── adapters/sources.py       # marketplace adapters (isolates each source)
-│   ├── db/                       # SQLite store + Postgres schema
-│   ├── alerting/notifier.py      # Discord / Telegram
-│   ├── tests/                    # 81 tests
-│   ├── main.py                   # FastAPI
-│   ├── dashboard.py              # Streamlit review UI
-│   └── DEVELOPER.md              # module-by-module reference
-│
-├── kijiji-scraper/               # GraphQL-based, isolated project
-├── craigslist-scraper/           # Playwright-based, isolated project
-├── ebay-scraper/                 # account-gated (not production-ready)
-├── facebook-marketplace-scraper/ # account-gated (not production-ready)
-│
-├── PROJECT_STATUS.md             # what's real vs stubbed (verified)
-├── DECISIONS.md                  # why each choice was made + rejected alternatives
-├── copilotinstructions.md        # golden principles, tech stack, roadmap
-└── WORKED_EXAMPLE.md             # one listing traced end-to-end + audit
+├── app/
+│   ├── scrape.py             # CLI: scrape → SQLite
+│   ├── dashboard.py          # Streamlit viewer
+│   ├── config.py             # scrape depth, lifecycle threshold
+│   ├── adapters/sources.py   # marketplace adapters
+│   ├── engines/              # resolver + listing_guard
+│   ├── models/schema.py      # RawListing
+│   ├── db/store.py           # SQLite persistence
+│   └── tests/                # 60 tests
+├── kijiji-scraper/           # self-contained scraper project
+├── craigslist-scraper/       # self-contained scraper project
+├── archive/engine-docs/      # the archived valuation engine's documentation
+└── requirements.txt (in app/)
 ```
 
-Each scraper is a **self-contained project** with its own config, models, and
-storage, so a markup change in one marketplace can't break the others.
+## Tests
 
----
+```bash
+cd app && python -m pytest -q      # 60 passed
+```
 
-## How a listing flows through the system
-
-Each stage is a pure function; all thresholds live in `app/config.py`.
-
-| Stage | Module | What it does |
-|---|---|---|
-| 1. Ingest | `adapters/sources.py` | Scrape a marketplace, normalize to `RawListing` |
-| 2. Pre-filter | `pipeline/ingest.py` | Drop junk: price < $10, "contact for price", trade posts, services |
-| 3. Resolve | `engines/resolver.py` | Title → canonical product, e.g. "EVGA RTX 3080 FTW3" → `RTX 3080` |
-| 4. Condition | `engines/condition.py` | Grade from keywords → `used_good`, with a confidence 0–1 |
-| 5. Comps | `engines/comp_engine.py` | IQR-trim outliers, compute median / P25 / P75 band |
-| 6. FMV | `valuation/fair_value.py` | `median × condition_multiplier ± adjustments` |
-| 7. ERV | `valuation/realize.py` | `FMV − platform fees − shipping − return reserve` |
-| 8. Score | `valuation/score.py` | Weighted margin/liquidity/urgency/confidence − penalties |
-| 9. Gate | `pipeline/ingest.py` | Profit ≥ $50 **and** margin ≥ 15% **and** ≥ 5 comps |
-| 10. Alert | `alerting/notifier.py` | Discord embed to a human who decides |
-
-Product resolution is a **3-tier waterfall** (exact alias regex → fuzzy
-`SequenceMatcher` → fallback to the raw title), so an unknown product degrades
-to "unresolved" rather than being mis-priced. No LLM is involved in resolution
-or pricing.
-
----
-
-## Design principles
-
-These are the non-negotiables the code is held to:
-
-1. **Comp-driven, never AI-guessed.** Valuations come from completed
-   transactions. LLMs never compute or override a price, a score, or a threshold.
-2. **Deterministic-first.** Rules, regex dictionaries, and statistics do the
-   work. Every engine function is pure, so every number is reproducible.
-3. **Valuation ≠ deal scoring.** What it's worth and whether it's worth your
-   time are separate concerns.
-4. **Human-in-the-loop.** Alert only. No autonomous checkout, seller messaging,
-   or account automation.
-5. **Traceability from day one.** Every decision is logged with its full payload
-   — that log *is* the future ML training set.
-6. **Config is the single source of truth.** No magic numbers in engine logic.
-
----
-
-## Documentation index
-
-| Document | Read it for |
-|---|---|
-| [`PROJECT_STATUS.md`](PROJECT_STATUS.md) | What works today, verified metrics, known tech debt |
-| [`DECISIONS.md`](DECISIONS.md) | Why each choice was made, alternatives rejected, interview Q&A |
-| [`WORKED_EXAMPLE.md`](WORKED_EXAMPLE.md) | One listing traced end-to-end, math hand-verified, plus two real bugs it exposed |
-| [`app/DEVELOPER.md`](app/DEVELOPER.md) | Module-by-module reference, valuation math, API, extending |
-| [`copilotinstructions.md`](copilotinstructions.md) | Golden principles, tech stack, phased roadmap |
-| [`kijiji-scraper/README.md`](kijiji-scraper/README.md) | Kijiji GraphQL architecture |
-| [`craigslist-scraper/README.md`](craigslist-scraper/README.md) | Craigslist browser-rendering architecture |
-
----
+Covers the store's persistence and disappearance tracking, the product resolver,
+the listing guard, the scrape helpers, and a real render of the dashboard via
+Streamlit's `AppTest`.
 
 ## Scope and compliance
 
-**In scope:** read-only discovery of public listings, statistical valuation,
-deal scoring, and alerting a human.
+**In scope:** read-only discovery of public listings, and showing them to a human.
 
-**Explicitly out of scope — by design, not by omission:**
+**Out of scope by design:** autonomous purchasing, seller messaging, marketplace
+account automation, and credential-gated sources.
 
-- Autonomous purchasing, checkout, or seller messaging.
-- Marketplace account automation.
-- Credential-gated sources (this is why eBay and Facebook are unimplemented
-  rather than scraped around).
-
-A wrong valuation should cost a glance, not money.
