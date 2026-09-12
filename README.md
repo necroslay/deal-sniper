@@ -61,6 +61,15 @@ view usable rather than a firehose:
 - **Table:** sortable, with a link to each listing, plus CSV export of the
   current filter
 
+It also **runs the scraper for you**. Pick a source and page depth in the sidebar
+and hit **▶ Run scrape now**; the results are shown in place and the view
+refreshes. The scrape runs as a **subprocess** — the same `app.scrape` CLI the
+terminal uses — for two reasons: the Craigslist adapter drives Playwright's
+*sync* API, which dislikes sharing a process with Streamlit, and a slow or
+crashing scrape can't take the viewer down with it.
+
+So the dashboard alone is enough: **step 2 above is optional.**
+
 ## Scraper details
 
 | Source | Method | Notes |
@@ -89,7 +98,7 @@ deal-sniper/
 │   ├── engines/              # resolver + listing_guard
 │   ├── models/schema.py      # RawListing
 │   ├── db/store.py           # SQLite persistence
-│   └── tests/                # 60 tests
+│   └── tests/                # 62 tests
 ├── kijiji-scraper/           # self-contained scraper project
 ├── craigslist-scraper/       # self-contained scraper project
 ├── archive/engine-docs/      # the archived valuation engine's documentation
@@ -99,12 +108,13 @@ deal-sniper/
 ## Tests
 
 ```bash
-cd app && python -m pytest -q      # 60 passed
+cd app && python -m pytest -q      # 62 passed
 ```
 
 Covers the store's persistence and disappearance tracking, the product resolver,
 the listing guard, the scrape helpers, and a real render of the dashboard via
-Streamlit's `AppTest`.
+Streamlit's `AppTest` — including clicking **Run scrape now** and asserting it
+invokes the scraper CLI against the right database.
 
 ## Scope and compliance
 

@@ -64,3 +64,62 @@ class TestDashboardRenders:
         at.run()
 
         assert not at.exception, [str(e) for e in at.exception]
+
+
+class TestRunScrapeControl:
+    """The dashboard can trigger the scraper itself.
+
+    ``subprocess.run`` is stubbed so the test never touches the network; what we
+    are asserting is that the UI wires up the *same CLI* the terminal uses.
+    """
+
+    def test_button_invokes_the_scraper_cli(self, tmp_path, monkeypatch):
+        import subprocess
+
+        from streamlit.testing.v1 import AppTest
+
+        db = str(tmp_path / "dash.db")
+        _seed(db)
+        monkeypatch.setenv("DEAL_SNIPER_DB", db)
+
+        captured = {}
+
+        class FakeCompleted:
+            returncode = 0
+            stdout = "Stored 3 listing(s)\n  new: 3   refreshed: 0"
+            stderr = ""
+
+        def fake_run(cmd, **kwargs):
+            captured["cmd"] = cmd
+            return FakeCompleted()
+
+        monkeypatch.setattr(subprocess, "run", fake_run)
+
+        at = AppTest.from_file(DASHBOARD, default_timeout=30)
+        at.run()
+        assert not at.exception, [str(e) for e in at.exception]
+
+        button = next(b for b in at.sidebar.button if "Run scrape" in b.label)
+        button.click().run()
+        assert not at.exception, [str(e) for e in at.exception]
+
+        cmd = captured.get("cmd")
+        assert cmd, "the scraper was never invoked"
+        assert "app.scrape" in cmd
+        assert "--source" in cmd and "--db" in cmd
+        assert db in cmd, "must write to the same database the dashboard reads"
+
+    def test_scrape_control_is_available_before_any_data_exists(self, tmp_path,
+                                                               monkeypatch):
+        """An empty database must not be a dead end."""
+        from streamlit.testing.v1 import AppTest
+
+        db = str(tmp_path / "empty.db")
+        Store(db=db).connect().close()
+        monkeypatch.setenv("DEAL_SNIPER_DB", db)
+
+        at = AppTest.from_file(DASHBOARD, default_timeout=30)
+        at.run()
+
+        assert not at.exception, [str(e) for e in at.exception]
+        assert any("Run scrape" in b.label for b in at.sidebar.button)

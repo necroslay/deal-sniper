@@ -11,13 +11,15 @@ from __future__ import annotations
 
 import os
 import pathlib
+import subprocess
 import sys
 
 import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
+REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT))
 
 from app.db.store import DB, Store
 
@@ -48,15 +50,66 @@ def load_listings(db_path: str) -> pd.DataFrame:
     return df
 
 
+def run_scrape(source: str, pages: int | None, db_path: str) -> tuple[int, str]:
+    """Run the scraper as a subprocess, returning ``(exit_code, output)``.
+
+    A subprocess rather than an in-process call, for two reasons: the Craigslist
+    adapter drives Playwright's *sync* API (which dislikes sharing a process with
+    Streamlit), and a scraper crash can't take the viewer down with it.
+
+    The same ``app.scrape`` CLI the terminal uses is invoked, so there is exactly
+    one code path to keep working.
+    """
+    cmd = [sys.executable, "-m", "app.scrape", "--source", source, "--db", db_path]
+    if pages:
+        cmd += ["--pages", str(pages)]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True,
+                              cwd=str(REPO_ROOT), timeout=900)
+    except subprocess.TimeoutExpired:
+        return 1, "Scrape timed out after 15 minutes."
+    return proc.returncode, ((proc.stdout or "") + (proc.stderr or "")).strip()
+
+
 st.title("💰 Deal Sniper")
 st.caption("Scraped second-hand computer parts — Kijiji + Craigslist (GTA)")
 
 df = load_listings(DB_PATH)
 
+# ── Run a scrape ───────────────────────────────────────────────────────────
+# Rendered before the empty-database guard on purpose: a fresh install should be
+# able to populate its own database from here, not just display one.
+st.sidebar.header("Run a scrape")
+scrape_source = st.sidebar.selectbox("Source", ["all", "kijiji", "craigslist"],
+                                     key="scrape_source")
+scrape_pages = st.sidebar.number_input("Pages (0 = use config)", min_value=0,
+                                       max_value=20, value=0, key="scrape_pages")
+
+if st.sidebar.button("▶  Run scrape now", use_container_width=True,
+                     type="primary", key="run_scrape"):
+    with st.spinner(f"Scraping {scrape_source}… this can take a minute"):
+        code, output = run_scrape(scrape_source, scrape_pages or None, DB_PATH)
+    load_listings.clear()                       # drop the cached view
+    st.session_state["scrape_result"] = {"code": code, "output": output}
+    st.rerun()
+
+# The result is stashed in session state so it survives the rerun above.
+if "scrape_result" in st.session_state:
+    result = st.session_state["scrape_result"]
+    del st.session_state["scrape_result"]
+    if result["code"] == 0:
+        st.success("Scrape finished — the figures below are refreshed.")
+    else:
+        st.warning("Scrape finished with problems.")
+    with st.expander("Scrape output", expanded=True):
+        st.code(result["output"] or "(no output)", language="text")
+
+st.sidebar.divider()
+
 if df.empty:
     st.info(
-        "No listings yet. Populate the database first:\n\n"
-        "```\npython -m app.scrape\n```"
+        "No listings yet. Use **▶ Run scrape now** in the sidebar, or run the "
+        "CLI:\n\n```\npython -m app.scrape\n```"
     )
     st.stop()
 
