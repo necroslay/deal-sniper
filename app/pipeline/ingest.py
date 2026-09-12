@@ -127,7 +127,7 @@ class IngestionPipeline:
                     # row's ``listing_id`` must always resolve to a parent listing
                     # (Postgres enforces this with a FK that SQLite silently
                     # ignores — without this, 169 decisions were orphaned).
-                    self.store.observe_listing(raw_listing)
+                    self.store.observe_listing(raw_listing, skip_reason=skip_reason)
                     self.store.insert_decision(output)
                 except Exception:
                     pass

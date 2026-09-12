@@ -36,6 +36,10 @@ SQL = """CREATE TABLE IF NOT EXISTS raw_listings (
     first_seen_at TEXT, last_seen_at TEXT,
     miss_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active', gone_at TEXT,
+    -- Why the pipeline refused to value this listing (accessory, lot, price too
+    -- low, ...). Rejected listings are kept for audit but must never feed the
+    -- inferred-comp path — a $40 "GPU power cable" is not an RTX 4090 sale.
+    skip_reason TEXT,
     UNIQUE(source, source_listing_id));
 CREATE TABLE IF NOT EXISTS valuation_decisions (
     id TEXT PRIMARY KEY, listing_id TEXT NOT NULL,
@@ -99,6 +103,7 @@ class Store:
             "miss_count": "INTEGER NOT NULL DEFAULT 0",
             "status": "TEXT NOT NULL DEFAULT 'active'",
             "gone_at": "TEXT",
+            "skip_reason": "TEXT",
         })
         # Seed the lifecycle clock from the scraped timestamp so pre-existing
         # rows are not instantly considered overdue/absent.
@@ -217,7 +222,8 @@ class Store:
 
     # ── Listing lifecycle ───────────────────────────────────────────────────
 
-    def observe_listing(self, listing, observed_at: Optional[str] = None) -> bool:
+    def observe_listing(self, listing, observed_at: Optional[str] = None,
+                        skip_reason: Optional[str] = None) -> bool:
         """Record one sighting of *listing* on this scrape cycle.
 
         Returns True if the listing was newly discovered, False if it was already
@@ -225,6 +231,11 @@ class Store:
         consecutive-miss counter; that is what makes disappearance detectable.
         A listing not seen for ``misses_before_gone`` cycles is retired by
         :meth:`close_observation_cycle`.
+
+        ``skip_reason`` records why the pipeline declined to value the listing
+        (see ``IngestionPipeline._pre_filter`` and ``assess_listing``). Rejected
+        listings are retained for audit but excluded from
+        :meth:`get_gone_listings`, so an accessory can never masquerade as a sale.
         """
         self._check()
         now = observed_at or datetime.now(timezone.utc).isoformat()
@@ -236,22 +247,22 @@ class Store:
                 "INSERT INTO raw_listings "
                 "(id, source, source_listing_id, title, price_cad, url, "
                 "location, description, date_posted, image_urls, scraped_at, "
-                "first_seen_at, last_seen_at, miss_count, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active')",
+                "first_seen_at, last_seen_at, miss_count, status, skip_reason) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active',?)",
                 (str(uuid.uuid4()), listing.source.value,
                  listing.source_listing_id, listing.title, listing.price_cad,
                  listing.url, listing.location or "", listing.description or "",
                  listing.date_posted, json.dumps(listing.image_urls),
-                 listing.scraped_at, now, now))
+                 listing.scraped_at, now, now, skip_reason))
             self._conn.commit()
             return True
 
         self._cur.execute(
             "UPDATE raw_listings SET last_seen_at = ?, miss_count = 0, "
             "status = 'active', gone_at = NULL, title = ?, price_cad = ?, "
-            "description = ? WHERE id = ?",
+            "description = ?, skip_reason = ? WHERE id = ?",
             (now, listing.title, listing.price_cad,
-             listing.description or "", row["id"]))
+             listing.description or "", skip_reason, row["id"]))
         self._conn.commit()
         return False
 
@@ -309,9 +320,14 @@ class Store:
         This is the raw material for inferred comps: a listing that was on offer
         and then vanished most likely sold. ``last_seen_at`` is the proxy sale
         date, and the last observed ``price_cad`` the proxy sale price.
+
+        Listings the pipeline *rejected* (``skip_reason`` set — accessories, lots,
+        junk prices) are excluded. Their titles frequently name a product they
+        merely fit, so letting them through would price a $40 power cable as an
+        RTX 4090 sale.
         """
         self._check()
-        clauses = ["status = 'gone'"]
+        clauses = ["status = 'gone'", "skip_reason IS NULL"]
         params: list = []
         if since_days:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()

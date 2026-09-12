@@ -83,6 +83,13 @@ def build_inferred_comp(row, *, haircut_pct: Optional[float] = None,
     if price <= 0:
         return None
 
+    # Defence in depth: the Store already excludes rejected listings, but a row
+    # carrying a skip_reason must never become a comp regardless of caller — its
+    # title usually names a product it merely fits (a "GPU power cable" is not
+    # an RTX 4090 sale).
+    if _get(row, "skip_reason"):
+        return None
+
     cfg = CFG.lifecycle
     haircut = cfg.inferred_comp_haircut_pct if haircut_pct is None else haircut_pct
     min_days = (cfg.min_days_listed_for_inference

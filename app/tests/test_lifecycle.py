@@ -273,3 +273,47 @@ class TestLifecycleEndToEnd:
         assert len(store.get_sold_comps(standard_name="RTX 3080",
                                         include_inferred=True)) == 1
 
+
+# ── Rejected listings must never become comps ───────────────────────────────
+
+class TestRejectedListingsNeverBecomeComps:
+    """A $40 'GPU power cable' must not be priced as an RTX 4090 sale.
+
+    Found by a live smoke test: the guard rejected the cable for valuation, but
+    the lifecycle path still retired it and derived an inferred comp from its
+    title, reintroducing the accessory-contamination bug through a new route.
+    """
+
+    def test_engine_skips_a_row_carrying_a_skip_reason(self):
+        row = _row(skip_reason="accessory_or_part")
+        assert build_inferred_comp(row, haircut_pct=0.0, min_days_listed=0) is None
+
+    def test_store_excludes_rejected_listings_from_gone(self, store):
+        store.observe_listing(_listing("good", price=800.0))
+        store.observe_listing(
+            _listing("cable", price=40.0, title="RTX 4090 power cable"),
+            skip_reason="accessory_or_part")
+        store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji])
+
+        assert [r["source_listing_id"]
+                for r in store.get_gone_listings()] == ["good"]
+        # ...but the rejected listing is still retained for audit.
+        assert store._cur.execute(
+            "SELECT COUNT(*) AS n FROM raw_listings").fetchone()["n"] == 2
+
+    def test_pipeline_rejects_cable_but_keeps_good_listing(self, store):
+        from app.pipeline.ingest import IngestionPipeline
+
+        pipeline = IngestionPipeline(store=store)
+        pipeline.process(raw_listing=_listing("good", price=800.0), persist=True)
+        pipeline.process(
+            raw_listing=_listing("cable", price=40.0,
+                                 title="RTX 4090 power cable"),
+            persist=True)
+        store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji])
+
+        comps = build_inferred_comps(store.get_gone_listings(), min_days_listed=0)
+        assert [c.source_listing_id for c in comps] == ["good"]
+
