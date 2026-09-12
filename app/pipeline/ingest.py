@@ -127,7 +127,7 @@ class IngestionPipeline:
                     # row's ``listing_id`` must always resolve to a parent listing
                     # (Postgres enforces this with a FK that SQLite silently
                     # ignores — without this, 169 decisions were orphaned).
-                    self.store.insert_listing(raw_listing)
+                    self.store.observe_listing(raw_listing)
                     self.store.insert_decision(output)
                 except Exception:
                     pass
@@ -243,7 +243,10 @@ class IngestionPipeline:
         # Persist to database
         if persist and self.store:
             try:
-                self.store.insert_listing(raw_listing)
+                # observe_listing both inserts a new listing and refreshes the
+                # lifecycle tracking columns (last_seen_at, miss_count) on repeat
+                # sightings — that is what makes disappearance detectable.
+                self.store.observe_listing(raw_listing)
                 self.store.insert_decision(output)
             except Exception as e:
                 logger.warning(f"Failed to persist decision: {e}")

@@ -33,6 +33,8 @@ Legend: ✅ works end-to-end · ⚠️ works with caveats · 🟡 partial / stub
 | Product resolver | ✅ | Regex waterfall, 52 products, unit tested |
 | Condition classifier | ✅ | Keyword+weight, unit tested |
 | Comp engine (IQR bands) | ✅ | Unit tested incl. explicit outlier fixture |
+| Listing lifecycle tracking | ✅ | `first_seen_at` / `last_seen_at` + miss counter; retires after N consecutive misses. Unit tested |
+| Inferred comps (disappearance proxy) | ⚠️ | Derived from retired listings at a config haircut; flagged `inferred`, **excluded from valuation by default** |
 | FMV / ERV / Deal score | ✅ | Unit tested |
 | SQLite persistence | ✅ | `app/resale_engine.db`, 802 listings / 869 decisions / 265 comps |
 | FastAPI service | ⚠️ | Endpoints work, but **`/feedback` only logs — does not persist** |
@@ -186,6 +188,31 @@ with operator-supplied credentials, or (c) a paid sold-comp provider. Bypassing
 the anti-bot measures was **rejected**: it contradicts the compliance stance in
 `copilotinstructions.md` §10.
 
+### Comp sourcing: the lifecycle proxy (added 2026-09-12)
+
+Since real sold data is unreachable, the pipeline derives a **second, weaker**
+comp signal from data it *can* read. Every scrape records a sighting of each
+live listing (`raw_listings.first_seen_at` / `last_seen_at`, `miss_count`,
+`status`). A listing that fails to reappear for `lifecycle.misses_before_gone`
+consecutive cycles is retired as `gone` — presumed sold — and converted into an
+inferred comp at `lifecycle.inferred_comp_haircut_pct` below its last asking
+price (`engines/lifecycle.py`).
+
+Guardrails, because this is evidence of *absence*, not proof of a sale:
+
+- inferred comps carry `sold_comps.inferred = 1` and are **excluded from
+  valuation by default** (`Store.get_sold_comps` filters them unless
+  `include_inferred=True`);
+- only sources that actually returned listings in a cycle are eligible for
+  retirement, so a failed scrape cannot retire an entire inventory;
+- `lifecycle.use_inferred_comps` defaults to **False** — the operator must turn
+  it on deliberately;
+- a listing pulled within `min_days_listed_for_inference` is ignored, filtering
+  typos and instant removals.
+
+The method needs repeated runs to accumulate, which is why `run_full_pipeline.py`
+no longer deletes the database by default (see `--fresh`).
+
 ---
 
 ## 6. Known discrepancies and tech debt
@@ -224,10 +251,14 @@ known next steps, not mysteries.
    task body logs `"... not yet wired — noop"`. There is no `@celery.task`
    decorator and no `celery_app`. Scheduling today = running a script by hand.
 
-5. **Comps are seeded, not sold.** All 265 comps come from a hardcoded
-   `BASELINE_COMPS` dict in `run_full_pipeline.py`, dated 60 days back. No eBay
-   *sold* data has ever been ingested. This is the biggest gap between the
-   project's stated principle ("comp-driven, not AI-guessed") and its behaviour.
+5. **Comps are synthetic or inferred — not observed sold data.** No eBay *sold*
+   data has ever been ingested, and §5 shows why: it is gated. What exists today
+   is the 265 synthetic `BASELINE_COMPS` rows — now moved to `app/tests/fixtures/`
+   and inserted **only** under `--seed-demo` — plus comps *inferred* from
+   listings that disappeared (the lifecycle proxy in §5), which are excluded from
+   valuation unless explicitly enabled. This remains the biggest gap between the
+   project's stated principle ("comp-driven, not AI-guessed") and its behaviour,
+   and it is a **data-access** problem, not a code problem.
 
 6. **`/feedback` doesn't persist.** It logs and returns `{"status":"recorded"}`.
    The `feedback_events` table exists in the Postgres schema only.

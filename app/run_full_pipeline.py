@@ -14,6 +14,8 @@ logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %
 from app.models.schema import Platform, SoldComp
 from app.pipeline.ingest import IngestionPipeline
 from app.db.store import Store
+from app.config import CFG
+from app.engines.lifecycle import build_inferred_comps
 from datetime import datetime, timezone, timedelta
 from collections import Counter
 
@@ -113,6 +115,34 @@ for i, raw in enumerate(listings):
     results.append(output)
     if (i + 1) % 50 == 0:
         print(f"  Processed {i+1}/{len(listings)}...")
+
+# ── Step 3b: Advance the listing lifecycle ───────────────────────────────
+# pipeline.process() recorded a sighting for every listing above. Now close the
+# cycle: anything from a source we *did* scrape that did not reappear earns a
+# miss, and enough consecutive misses retires it (presumed sold). Only sources
+# that actually returned listings are considered, so a source that errored or
+# returned nothing can't retire its whole inventory.
+seen_keys = {(r.raw_listing.source.value, r.raw_listing.source_listing_id)
+             for r in results}
+scraped_sources = {r.raw_listing.source for r in results}
+if scraped_sources:
+    cycle = store.close_observation_cycle(seen_keys=seen_keys,
+                                          sources=scraped_sources)
+    print(f"  Lifecycle: {cycle['missed']} missed this cycle, "
+          f"{cycle['gone']} newly retired")
+
+    # Turn disappeared listings into inferred comps. Harmless to store even when
+    # unused: get_sold_comps() excludes inferred rows unless explicitly asked.
+    gone_rows = store.get_gone_listings(since_days=CFG.lifecycle.inference_window_days)
+    inferred = build_inferred_comps(gone_rows)
+    added = sum(1 for c in inferred if store.insert_sold_comp(c))
+    print(f"  Inferred comps: {len(inferred)} built, {added} new "
+          f"(haircut {CFG.lifecycle.inferred_comp_haircut_pct:.0%})")
+    if not CFG.lifecycle.use_inferred_comps:
+        print("  (inferred comps excluded from valuation — "
+              "set lifecycle.use_inferred_comps to enable)")
+else:
+    print("  Lifecycle: skipped (no listings scraped this run)")
 
 # ── Step 4: Breakdown ────────────────────────────────────────────────────
 print("\n" + "=" * 60)
@@ -228,16 +258,20 @@ print("=" * 60)
 coverage_pct = (fmv_count / decisions_total * 100) if decisions_total else 0.0
 print(f"  FMV coverage: {fmv_count} / {decisions_total} decisions ({coverage_pct:.0f}%)")
 
-# Real vs synthetic comps. Synthetic rows are only ever created by --seed-demo.
-real_comps = cur.execute(
-    "SELECT COUNT(*) FROM sold_comps WHERE source_listing_id NOT LIKE 'baseline_%'"
-).fetchone()[0]
-synth_comps = cur.execute(
-    "SELECT COUNT(*) FROM sold_comps WHERE source_listing_id LIKE 'baseline_%'"
-).fetchone()[0]
-print(f"  Comps by origin:  real={real_comps}  synthetic={synth_comps}")
-if real_comps == 0:
-    print("  !! No real sold comps ingested — every valuation rests on synthetic data.")
+# Comp origins: synthetic rows are created only by --seed-demo; inferred rows
+# come from the listing lifecycle and are excluded from valuation unless enabled.
+origin = store.count_comps_by_origin()
+print(f"  Comps by origin:  real={origin['real']}  "
+      f"inferred={origin['inferred']}  synthetic={origin['synthetic']}")
+if origin["real"] == 0:
+    print("  !! No real sold comps ingested — valuations rest on "
+          "synthetic and/or inferred data only.")
+
+# Listing lifecycle: how much inventory has been retired (presumed sold).
+listing_states = {r["status"]: r["n"] for r in cur.execute(
+    "SELECT status, COUNT(*) AS n FROM raw_listings GROUP BY status").fetchall()}
+print("  Listings by status:  " +
+      "  ".join(f"{k}={v}" for k, v in sorted(listing_states.items())))
 
 # Comps per product, with a marker where coverage is below the gate.
 print("\n  Comps per product (top 15):")

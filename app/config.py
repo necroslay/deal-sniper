@@ -141,6 +141,28 @@ class ScraperSourceConfig:
 
 
 @dataclass
+class LifecycleConfig:
+    """Listing-lifecycle tracking — inferring sales from *disappearance*.
+
+    No free source exposes real completed-sales data (see PROJECT_STATUS.md §5:
+    eBay gates sold search behind sign-in and a CAPTCHA, PriceCharting/130point
+    sit behind Cloudflare, Swappa shows asking prices only). So a second, weaker
+    signal is derived from data we *can* read: every scrape re-observes the live
+    listings, and one that stops appearing across several consecutive scrapes is
+    treated as sold — at a haircut to its last observed asking price.
+
+    These are marked ``inferred`` and kept separate from real sold comps, and
+    ``use_inferred_comps`` defaults to **False** so they can never silently
+    become ground truth. Turn it on deliberately.
+    """
+    misses_before_gone: int = 3
+    inferred_comp_haircut_pct: float = 0.05
+    inference_window_days: int = 30
+    min_days_listed_for_inference: float = 1.0
+    use_inferred_comps: bool = False
+
+
+@dataclass
 class AppConfig:
     """Top-level config aggregating all sub-configs."""
     platform_fees: PlatformFees = field(default_factory=PlatformFees)
@@ -155,6 +177,7 @@ class AppConfig:
     comp: CompConfig = field(default_factory=CompConfig)
     alert_gate: AlertGate = field(default_factory=AlertGate)
     scraper_sources: ScraperSourceConfig = field(default_factory=ScraperSourceConfig)
+    lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
     currency: str = "CAD"
     country: str = "CA"
 

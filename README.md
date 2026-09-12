@@ -49,8 +49,8 @@ keeps them separate.
 | **Live sources** | Kijiji, Craigslist |
 | **Gated (not built)** | eBay, Facebook Marketplace — both require accounts |
 | **Last verified run** | 867 listings scraped, 867 decisions scored, both sources live (2 pass the alert gate) |
-| **Tests** | 151 engine tests + 39 scraper-parser tests, all passing |
-| **Known bottleneck** | Comp coverage — only ~14% of listings get an FMV (the precision defects found in the audit are fixed) |
+| **Tests** | 171 engine tests + 39 scraper-parser tests, all passing |
+| **Known bottleneck** | Comp *data access* — no free source exposes real sold comps (eBay gated, PriceCharting/130point behind Cloudflare). A lifecycle "disappearance" proxy exists but is off by default |
 
 Full detail, including tech debt and honest caveats, is in
 [`PROJECT_STATUS.md`](PROJECT_STATUS.md). **Read it before presenting this
@@ -66,10 +66,13 @@ cd app
 pip install -r requirements.txt
 
 # 2. Run the test suite (no network needed)
-python -m pytest -q                      # 81 passed
+python -m pytest -q                      # 171 passed
 
-# 3. Run the full pipeline: seed comps -> scrape live -> value -> persist
+# 3. Run the full pipeline: scrape live -> value -> persist (accumulating DB)
 python run_full_pipeline.py
+
+# 3b. Demo mode: synthetic comps, self-contained DB (do NOT draw conclusions)
+python run_full_pipeline.py --fresh --seed-demo
 
 # 4. Serve the API
 uvicorn app.main:app --port 8000
@@ -79,8 +82,9 @@ The Craigslist scraper needs a browser. It drives the **Chrome already installed
 on your machine** via Playwright (`channel="chrome"`), so normally nothing extra
 to install; if Playwright's package is missing, `pip install playwright`.
 
-> Full pipeline runs delete `app/resale_engine.db` and rebuild it from scratch,
-> so each report is self-contained.
+> The database **accumulates** by default — that is what lets the pipeline track
+> listings across runs and infer sales from disappearances. Pass `--fresh` for a
+> throwaway, self-contained run.
 
 ---
 

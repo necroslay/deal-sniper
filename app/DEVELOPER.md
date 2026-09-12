@@ -91,13 +91,16 @@ app/
 |   +-- comp_engine.py        # Comp aggregation & IQR
 |   +-- condition.py          # Condition classifier
 |   +-- resolver.py           # Product normalizer
+|   +-- listing_guard.py      # Rejects accessories/lots before valuation
+|   +-- adjustments.py        # Item-level deductions (missing box, damage)
+|   +-- lifecycle.py          # Inferred comps from listing disappearance
 +-- models/schema.py          # Pydantic v2 models
 +-- pipeline/ingest.py        # Pipeline orchestrator
 +-- valuation/
 |   +-- fair_value.py         # FMV computation
 |   +-- realize.py            # ERV computation
 |   +-- score.py              # Deal score computation
-+-- tests/ (13 files, 151 tests)
++-- tests/ (15 files, 171 tests)
 +-- config.py                 # Central config (16 sections)
 +-- main.py                   # FastAPI app (5 endpoints)
 +-- dashboard.py              # Streamlit dashboard
@@ -137,6 +140,7 @@ CFG.condition_multipliers.used_good  # 0.82
 | comp | window 90d, min 5 comps, IQR 1.5x | Aggregation params |
 | alert_gate | profit $50, margin 15%, min 5 comps | Alert thresholds |
 | scraper_sources | pages/source, delays 1.5-3s | Scrape config |
+| lifecycle | 3 misses, 5% haircut, inferred off | Disappearance-inferred comps |
 
 ### Changing config at runtime
 
@@ -602,6 +606,9 @@ Q1=450, Q3=580, IQR=130. Lower=450-1.5*130=255, Upper=580+1.5*130=775. Removes 1
 | margin_weight | 0.50 | 50% of deal score from margin |
 | min_expected_profit_cad | 50.0 | Minimum profit for alert |
 | min_margin_pct | 0.15 | 15% minimum margin for alert |
+| lifecycle.misses_before_gone | 3 | Consecutive absent scrapes before a listing is presumed sold |
+| lifecycle.inferred_comp_haircut_pct | 0.05 | Discount applied to the last asking price for an inferred comp |
+| lifecycle.use_inferred_comps | False | Whether inferred comps may enter valuation (off by default) |
 
 ---
 

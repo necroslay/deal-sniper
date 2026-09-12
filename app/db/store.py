@@ -4,6 +4,7 @@ import json, logging, re, sqlite3, uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+from app.config import CFG
 from app.engines.resolver import resolve_product
 from app.models.schema import FeedbackEvent, Platform, RawListing, SoldComp, ValuationOutput
 from app.valuation.gate import passes_alert_gate
@@ -32,6 +33,9 @@ SQL = """CREATE TABLE IF NOT EXISTS raw_listings (
     location TEXT NOT NULL DEFAULT '', description TEXT NOT NULL DEFAULT '',
     date_posted TEXT, image_urls TEXT DEFAULT '[]',
     scraped_at TEXT NOT NULL,
+    first_seen_at TEXT, last_seen_at TEXT,
+    miss_count INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'active', gone_at TEXT,
     UNIQUE(source, source_listing_id));
 CREATE TABLE IF NOT EXISTS valuation_decisions (
     id TEXT PRIMARY KEY, listing_id TEXT NOT NULL,
@@ -49,6 +53,7 @@ CREATE TABLE IF NOT EXISTS sold_comps (
     sold_price_cad REAL NOT NULL, sold_date TEXT NOT NULL,
     condition TEXT NOT NULL DEFAULT '', url TEXT, location TEXT,
     scraped_at TEXT, product_key TEXT,
+    inferred INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source, source_listing_id));
 CREATE INDEX IF NOT EXISTS idx_comps_name ON sold_comps(title);"""
 
@@ -62,17 +67,49 @@ class Store:
         self._cur.executescript(SQL); self._conn.commit()
         self._migrate()
 
+    def _ensure_columns(self, table, columns):
+        """Add any missing columns to *table*.
+
+        SQLite has no ``ADD COLUMN IF NOT EXISTS``, so each column is checked
+        against ``PRAGMA table_info`` first. Needed because the schema above uses
+        ``CREATE TABLE IF NOT EXISTS`` and so never alters an existing table.
+        """
+        existing = {r["name"] for r in self._cur.execute(f"PRAGMA table_info({table})")}
+        for name, decl in columns.items():
+            if name not in existing:
+                self._cur.execute(f"ALTER TABLE {table} ADD COLUMN {name} {decl}")
+
     def _migrate(self):
         """Bring an older database up to date and backfill derived columns.
 
         ``product_key`` was added to ``sold_comps`` to fix comp-lookup
-        contamination. Databases created before that change need the column
-        added and their existing rows resolved, so that exact-match lookups can
-        still find them.
+        contamination. ``inferred`` separates lifecycle-inferred comps from
+        observed sales. The ``raw_listings`` lifecycle columns make it possible
+        to tell a listing that vanished (likely sold) from one still on offer.
+        Databases created before any of these need the columns added and
+        existing rows backfilled.
         """
-        cols = {r["name"] for r in self._cur.execute("PRAGMA table_info(sold_comps)")}
-        if "product_key" not in cols:
-            self._cur.execute("ALTER TABLE sold_comps ADD COLUMN product_key TEXT")
+        self._ensure_columns("sold_comps", {
+            "product_key": "TEXT",
+            "inferred": "INTEGER NOT NULL DEFAULT 0",
+        })
+        self._ensure_columns("raw_listings", {
+            "first_seen_at": "TEXT",
+            "last_seen_at": "TEXT",
+            "miss_count": "INTEGER NOT NULL DEFAULT 0",
+            "status": "TEXT NOT NULL DEFAULT 'active'",
+            "gone_at": "TEXT",
+        })
+        # Seed the lifecycle clock from the scraped timestamp so pre-existing
+        # rows are not instantly considered overdue/absent.
+        self._cur.execute(
+            "UPDATE raw_listings SET first_seen_at = scraped_at "
+            "WHERE first_seen_at IS NULL"
+        )
+        self._cur.execute(
+            "UPDATE raw_listings SET last_seen_at = scraped_at "
+            "WHERE last_seen_at IS NULL"
+        )
 
         # Created here rather than in SQL: on a legacy database the column above
         # does not exist until this migration runs, and CREATE INDEX on a missing
@@ -80,6 +117,10 @@ class Store:
         self._cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_comps_product_key "
             "ON sold_comps(product_key)"
+        )
+        self._cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_listings_status "
+            "ON raw_listings(status)"
         )
 
         stale = self._cur.execute(
@@ -128,22 +169,28 @@ class Store:
             self._cur.execute(
                 "INSERT OR IGNORE INTO sold_comps "
                 "(id, source, source_listing_id, title, sold_price_cad, "
-                "sold_date, condition, url, location, scraped_at, product_key) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                "sold_date, condition, url, location, scraped_at, product_key, inferred) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
                 (cid, comp.source.value, comp.source_listing_id,
                  comp.title, comp.sold_price_cad, comp.sold_date,
                  comp.condition, comp.url or "", comp.location or "",
-                 comp.scraped_at, product_key))
+                 comp.scraped_at, product_key, 1 if comp.inferred else 0))
             self._conn.commit(); return self._cur.rowcount > 0
         except sqlite3.IntegrityError: return False
 
-    def get_sold_comps(self, standard_name=None, max_days_old=90, limit=100):
+    def get_sold_comps(self, standard_name=None, max_days_old=90, limit=100,
+                       include_inferred=False):
         """Return sold comps for a canonical product.
 
         Matches on the resolved ``product_key`` — an **exact** match. Matching on
         ``title`` with ``LIKE '%name%'`` would let a base model absorb its own
         variants, because "RTX 3060 Ti" contains the substring "RTX 3060". That
         silently inflates the base model's comp median (and therefore its FMV).
+
+        ``include_inferred`` defaults to **False**, so comps inferred from a
+        listing's disappearance (see ``config.LifecycleConfig``) are excluded
+        unless the caller asks for them. Real observed sales and inferred ones
+        must never be silently mixed.
         """
         self._check()
         clauses = []; params = []
@@ -152,6 +199,8 @@ class Store:
         if max_days_old:
             cutoff = (datetime.now(timezone.utc) - timedelta(days=max_days_old)).isoformat()
             clauses.append("sold_date >= ?"); params.append(cutoff)
+        if not include_inferred:
+            clauses.append("inferred = 0")
         where = "WHERE " + " AND ".join(clauses) if clauses else ""
         self._cur.execute(
             f"SELECT * FROM sold_comps {where} ORDER BY sold_date DESC LIMIT ?",
@@ -163,7 +212,132 @@ class Store:
             sold_date=row["sold_date"], condition=row["condition"],
             url=row["url"] or "", location=row["location"] or "",
             product_key=row["product_key"],
+            inferred=bool(row["inferred"]),
             scraped_at=row["scraped_at"] or "") for row in self._cur.fetchall()]
+
+    # ── Listing lifecycle ───────────────────────────────────────────────────
+
+    def observe_listing(self, listing, observed_at: Optional[str] = None) -> bool:
+        """Record one sighting of *listing* on this scrape cycle.
+
+        Returns True if the listing was newly discovered, False if it was already
+        known. Each sighting refreshes ``last_seen_at`` and resets the
+        consecutive-miss counter; that is what makes disappearance detectable.
+        A listing not seen for ``misses_before_gone`` cycles is retired by
+        :meth:`close_observation_cycle`.
+        """
+        self._check()
+        now = observed_at or datetime.now(timezone.utc).isoformat()
+        row = self._cur.execute(
+            "SELECT id FROM raw_listings WHERE source = ? AND source_listing_id = ?",
+            (listing.source.value, listing.source_listing_id)).fetchone()
+        if row is None:
+            self._cur.execute(
+                "INSERT INTO raw_listings "
+                "(id, source, source_listing_id, title, price_cad, url, "
+                "location, description, date_posted, image_urls, scraped_at, "
+                "first_seen_at, last_seen_at, miss_count, status) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active')",
+                (str(uuid.uuid4()), listing.source.value,
+                 listing.source_listing_id, listing.title, listing.price_cad,
+                 listing.url, listing.location or "", listing.description or "",
+                 listing.date_posted, json.dumps(listing.image_urls),
+                 listing.scraped_at, now, now))
+            self._conn.commit()
+            return True
+
+        self._cur.execute(
+            "UPDATE raw_listings SET last_seen_at = ?, miss_count = 0, "
+            "status = 'active', gone_at = NULL, title = ?, price_cad = ?, "
+            "description = ? WHERE id = ?",
+            (now, listing.title, listing.price_cad,
+             listing.description or "", row["id"]))
+        self._conn.commit()
+        return False
+
+    def close_observation_cycle(self, seen_keys, misses_before_gone=None,
+                                sources=None) -> dict:
+        """Advance lifecycle state after a full scrape pass.
+
+        ``seen_keys`` is the set of ``(source, source_listing_id)`` pairs observed
+        this cycle. Every *other* active listing has its consecutive-miss counter
+        incremented; once the counter reaches ``misses_before_gone`` the listing
+        moves to ``status='gone'`` and is stamped with ``gone_at``.
+
+        ``sources`` should list the sources actually scraped this cycle. Only
+        listings from those sources are considered — otherwise a source that
+        happened to return nothing would retire its whole inventory as "sold".
+
+        Returns ``{"missed": n, "gone": n}``.
+        """
+        self._check()
+        threshold = (misses_before_gone if misses_before_gone is not None
+                     else CFG.lifecycle.misses_before_gone)
+        now = datetime.now(timezone.utc).isoformat()
+        seen = set(seen_keys or ())
+
+        sql = "SELECT id, source, source_listing_id, miss_count FROM raw_listings " \
+              "WHERE status = 'active'"
+        params: list = []
+        if sources:
+            srcs = [s.value if hasattr(s, "value") else str(s) for s in sources]
+            sql += " AND source IN (%s)" % ",".join("?" for _ in srcs)
+            params = srcs
+        rows = self._cur.execute(sql, params).fetchall()
+
+        missed = gone = 0
+        for row in rows:
+            if (row["source"], row["source_listing_id"]) in seen:
+                continue
+            missed += 1
+            misses = (row["miss_count"] or 0) + 1
+            if misses >= threshold:
+                self._cur.execute(
+                    "UPDATE raw_listings SET miss_count = ?, status = 'gone', "
+                    "gone_at = ? WHERE id = ?", (misses, now, row["id"]))
+                gone += 1
+            else:
+                self._cur.execute(
+                    "UPDATE raw_listings SET miss_count = ? WHERE id = ?",
+                    (misses, row["id"]))
+        self._conn.commit()
+        return {"missed": missed, "gone": gone}
+
+    def get_gone_listings(self, since_days=None, limit=1000):
+        """Return listings that disappeared after being observed.
+
+        This is the raw material for inferred comps: a listing that was on offer
+        and then vanished most likely sold. ``last_seen_at`` is the proxy sale
+        date, and the last observed ``price_cad`` the proxy sale price.
+        """
+        self._check()
+        clauses = ["status = 'gone'"]
+        params: list = []
+        if since_days:
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=since_days)).isoformat()
+            clauses.append("gone_at >= ?")
+            params.append(cutoff)
+        where = "WHERE " + " AND ".join(clauses)
+        return self._cur.execute(
+            f"SELECT * FROM raw_listings {where} ORDER BY gone_at DESC LIMIT ?",
+            params + [limit]).fetchall()
+
+    def count_comps_by_origin(self) -> dict:
+        """Return ``{"real": n, "inferred": n, "synthetic": n}`` comp counts.
+
+        Synthetic rows are the ``baseline_`` seed rows (see
+        ``app/tests/fixtures/baseline_comps.py``); they exist only in
+        ``--seed-demo`` runs and must never be mistaken for evidence.
+        """
+        self._check()
+        row = self._cur.execute(
+            "SELECT "
+            "  SUM(CASE WHEN source_listing_id LIKE 'baseline_%' THEN 1 ELSE 0 END) AS synthetic, "
+            "  SUM(CASE WHEN source_listing_id NOT LIKE 'baseline_%' AND inferred = 0 THEN 1 ELSE 0 END) AS real, "
+            "  SUM(CASE WHEN source_listing_id NOT LIKE 'baseline_%' AND inferred = 1 THEN 1 ELSE 0 END) AS inferred "
+            "FROM sold_comps"
+        ).fetchone()
+        return {k: int(row[k] or 0) for k in ("real", "inferred", "synthetic")}
 
     def insert_decision(self, output):
         self._check(); did = str(uuid.uuid4())

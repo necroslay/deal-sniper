@@ -70,6 +70,10 @@ class SoldComp(BaseModel):
     # already knows it (e.g. seeding a baseline table); when None the store
     # derives it from `title` at insert time.
     product_key: Optional[str] = None
+    # True for a comp inferred from a *disappeared* listing rather than an
+    # observed completed sale (see config.LifecycleConfig). Kept explicit so
+    # inferred and real comps can be queried and weighted separately.
+    inferred: bool = False
     scraped_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
