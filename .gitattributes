@@ -1,0 +1,12 @@
+# Normalise line endings: store LF in the repo, regardless of OS.
+* text=auto eol=lf
+
+# Explicit binary types (never touch these)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.zip binary
+*.db binary
+*.sqlite binary

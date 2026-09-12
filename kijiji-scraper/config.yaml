@@ -1,0 +1,65 @@
+# =============================================================================
+# Kijiji GPU Scraper — Configuration
+# =============================================================================
+# This file centralises all tunable parameters for the scraper. Change values
+# here instead of editing source code.
+
+# ── Search & Location ────────────────────────────────────────────────────────
+search:
+  # Base domain — change if Kijiji moves region/country
+  base_url: "https://www.kijiji.ca"
+  # URL template: {search_term} and {page} are filled at runtime.
+  # k0         = no category filter
+  # l1700272   = Toronto (GTA) location ID
+  url_template: "https://www.kijiji.ca/b-gta-greater-toronto-area/{search_term}/k0l1700272?page={page}"
+  # Default search term used when --search is not passed
+  default_search_term: "graphics-card"
+  # Terms swept by scrape_terms() / the deal-sniper pipeline's "ALL" mode.
+  # Kijiji's search is keyword-based, so several narrow terms surface more
+  # distinct GPU listings than one broad term (which also drags in junk like
+  # "business card design" when searching "graphics-card").
+  search_terms:
+    - "graphics-card"
+    - "gpu"
+    - "video-card"
+    - "rtx-4090"
+    - "rtx-3080"
+    - "rtx-3070"
+    - "rtx-3060"
+    - "rx-7900"
+    - "radeon"
+  # Max listings per page (Kijiji caps this server-side at 40)
+  listings_per_page: 40
+  # Target total listings to scrape per search term
+  # (pages = max_listings / listings_per_page)
+  max_listings: 400
+
+# ── GPU Model Filters ────────────────────────────────────────────────────────
+# Only listings whose title (lowercased) matches one of these are kept
+# when --all is NOT passed. Add/remove models here over time.
+high_end_gpus:
+  - "rtx 4090"
+  - "rtx 4080 super"
+  - "rtx 4080"
+  - "rtx 5090"
+  - "rtx 5080"
+  - "rx 7900 xtx"
+  - "rx 7900 xt"
+
+# ── Request Behaviour ────────────────────────────────────────────────────────
+request:
+  # Delay (seconds) between page requests to avoid rate-limiting
+  page_delay: 2.0
+  # HTTP request timeout in seconds
+  timeout: 30
+  # Browser / platform to mimic via cloudscraper
+  browser: "chrome"
+  platform: "windows"
+  mobile: false
+  # Custom HTTP headers
+  headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    Accept-Language: "en-CA,en-US;q=0.7,en;q=0.3"
+    Referer: "https://www.kijiji.ca/"
+    DNT: "1"
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"

@@ -1,0 +1,50 @@
+# =============================================================================
+# Craigslist Canada Scraper — Configuration
+# =============================================================================
+
+# ── Search & Location ────────────────────────────────────────────────────────
+search:
+  base_url: "https://toronto.craigslist.org"
+  # {location}, {category} and {search_term} are filled at runtime.
+  # sort=date keeps the freshest listings first (feed order is unreliable).
+  url_template: "https://{location}.craigslist.org/search/{category}?query={search_term}&sort=date"
+  default_search_term: "graphics card"
+  default_location: "toronto"
+  # cpd = "computer parts" — where GPU/PC-parts listings actually live.
+  # (The "elec" category returns no results for GPU queries.)
+  default_category: "cpd"
+  default_pages: 2
+  listings_per_page: 120
+  # Categories swept when no --category is supplied.
+  categories: ["cpd", "sys", "elec"]
+  category_map:
+    elec: "Electronics"
+    cpd: "Computer Parts"
+    sys: "Computers"
+    msg: "Video Gaming"
+
+# ── Headless Browser ─────────────────────────────────────────────────────────
+# Craigslist search results are rendered client-side: a plain HTTP GET returns
+# an ~8 KB JS-only shell (0 rows) and the legacy ?format=rss feed 404s. A real
+# browser is required. We drive the Chrome already installed on the machine.
+browser:
+  enabled: true
+  headless: true
+  channel: "chrome"           # falls back to Playwright's bundled Chromium
+  timeout_ms: 60000
+  settle_ms: 1500
+  wait_for_selector: "div.cl-search-result"
+  block_images: true
+  fallback_to_requests: true
+
+
+# ── Request Behaviour ────────────────────────────────────────────────────────
+request:
+  page_delay: 1.5
+  timeout: 30
+  headers:
+    Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+    Accept-Language: "en-CA,en-US;q=0.7,en;q=0.3"
+    Referer: "https://www.craigslist.org/"
+    DNT: "1"
+    User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
