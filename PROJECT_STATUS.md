@@ -79,7 +79,7 @@ ALERT_IMMEDIATE     0    (0%)
 
 ```bash
 # Unit tests (no network)
-cd app && python -m pytest -q                        # 151 passed
+cd app && python -m pytest -q                        # 176 passed
 cd craigslist-scraper && python -m pytest tests -q   # 39 passed
 
 # Full pipeline: seed comps -> scrape live -> value -> persist -> report
