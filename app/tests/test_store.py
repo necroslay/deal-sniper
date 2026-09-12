@@ -35,6 +35,28 @@ class TestObserveListing:
             "SELECT flag_reason FROM raw_listings").fetchone()
         assert row["flag_reason"] == "accessory_or_part"
 
+    def test_listing_without_a_source_id_is_refused(self, store, make_listing):
+        """A blank id cannot be identified, so it must not be written.
+
+        Regression: ``UNIQUE(source, source_listing_id)`` plus a blank id meant
+        every id-less listing collided on the key ``(source, '')``, so each one
+        silently overwrote the last — hundreds of listings collapsing into one
+        row with no error. Craigslist produced exactly this when its markup
+        changed and ids parsed as empty.
+        """
+        assert store.observe_listing(make_listing("", title="mystery item")) is False
+        assert store.counts()["total"] == 0
+
+    def test_whitespace_only_id_is_also_refused(self, store, make_listing):
+        assert store.observe_listing(make_listing("   ", title="blankish")) is False
+        assert store.counts()["total"] == 0
+
+    def test_many_idless_listings_cannot_collapse_into_one_row(self, store,
+                                                               make_listing):
+        for i in range(5):
+            store.observe_listing(make_listing("", title=f"no id {i}"))
+        assert store.counts()["total"] == 0
+
 
 class TestObservationCycle:
     def test_retires_only_after_threshold_misses(self, store, make_listing):

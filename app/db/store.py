@@ -129,6 +129,18 @@ class Store:
                 so the viewer can hide junk.
         """
         self._check()
+
+        if not (listing.source_listing_id or "").strip():
+            # A listing with no source id cannot be identified. Storing it would
+            # file it under the blank key ``(source, '')``, where every later
+            # id-less listing would silently overwrite it — one row instead of
+            # hundreds, with no error. Refuse it loudly instead.
+            logger.warning(
+                "Skipping listing with no source id (source=%s, title=%r)",
+                listing.source.value, (listing.title or "")[:60],
+            )
+            return False
+
         now = observed_at or datetime.now(timezone.utc).isoformat()
         row = self._cur.execute(
             "SELECT id FROM raw_listings WHERE source = ? AND source_listing_id = ?",

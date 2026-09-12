@@ -69,16 +69,26 @@ def dedupe_by_url(listings: list) -> list:
     return unique
 
 
-def store_listings(store: Store, listings: list) -> tuple[set, int, Counter]:
-    """Persist *listings*, enriched with product name and a junk flag.
+def store_listings(store: Store, listings: list) -> tuple[set, int, int, Counter]:
+    """Persist *listings*, enriched with a product name and a junk flag.
 
-    Returns ``(seen_keys, new_count, product_counts)``.
+    Product resolution and the junk check happen here rather than in the Store,
+    so the persistence layer stays a plain store.
+
+    Listings with no source id are skipped and counted: they cannot be
+    identified, and filing them under a blank key would let each one silently
+    overwrite the previous.
+
+    Returns ``(seen_keys, new, skipped, product_counts)``.
     """
     seen_keys: set = set()
-    new = 0
+    new = skipped = 0
     products: Counter = Counter()
 
     for listing in listings:
+        if not (listing.source_listing_id or "").strip():
+            skipped += 1
+            continue
         product = resolve_product(listing.title)
         flag = assess_listing(listing.title, product)
         if store.observe_listing(listing, product_key=product.standard_name,
@@ -87,7 +97,7 @@ def store_listings(store: Store, listings: list) -> tuple[set, int, Counter]:
         seen_keys.add((listing.source.value, listing.source_listing_id))
         products[product.standard_name] += 1
 
-    return seen_keys, new, products
+    return seen_keys, new, skipped, products
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -130,16 +140,19 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     listings = dedupe_by_url(collected)
-    seen_keys, new, products = store_listings(store, listings)
+    seen_keys, new, skipped, products = store_listings(store, listings)
 
     # Retire listings that stopped appearing. Restricted to the sources we
     # actually read, so a source that returned nothing cannot retire inventory.
     cycle = store.close_observation_cycle(seen_keys=seen_keys, sources=scraped)
 
     counts = store.counts()
-    print(f"\nStored {len(listings)} listing(s) "
-          f"({len(collected) - len(listings)} duplicate URL(s) skipped)")
-    print(f"  new: {new}   refreshed: {len(listings) - new}")
+    print(f"\nScraped {len(collected)} listing(s), {len(listings)} unique "
+          f"({len(collected) - len(listings)} duplicate URL(s) dropped)")
+    print(f"  new: {new}   refreshed: {len(listings) - new - skipped}")
+    if skipped:
+        print(f"  !! {skipped} listing(s) skipped — no source id, so they "
+              f"cannot be identified. Check that scraper's id parsing.")
     print(f"  lifecycle: {cycle['missed']} missed, {cycle['gone']} newly gone")
     print(f"  database: {counts['total']} total, {counts['active']} active, "
           f"{counts['gone']} gone  ({counts['by_source']})")

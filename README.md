@@ -52,6 +52,35 @@ view usable rather than a firehose:
 - **Listing guard** (`engines/listing_guard.py`) — flags accessories, multi-item
   lots, and "X for PS5" listings so they don't pollute the view.
 
+### How duplicates are handled
+
+Two layers:
+
+1. **Within a run** — the same listing surfaces under several Kijiji search
+   terms, so results are collapsed by URL before anything is stored.
+2. **Across runs** — `raw_listings` has `UNIQUE(source, source_listing_id)`, so
+   each scrape either inserts (counted as *new*) or updates the existing row's
+   `last_seen_at` and clears its miss counter (counted as *refreshed*). A
+   listing is stored **once, forever**, and accumulates its own history.
+
+That id is the marketplace's own identifier — Kijiji's ad id, or Craigslist's
+`data-pid`. Live run: `623` rows = `623` distinct ids = `623` distinct URLs, with
+`new: 3, refreshed: 258`.
+
+**Dedup is by *listing*, not by *item*.** A seller who relists, or posts one ad
+across ten cities, produces ten rows — they really are ten listings. So the
+counts are listing counts, not item counts.
+
+A listing with **no id is refused** rather than stored: filing it under a blank
+key would let every subsequent id-less listing overwrite it silently, collapsing
+hundreds of rows into one with no error.
+
+> **Caveat on "gone".** A listing is retired after
+> `CFG.lifecycle.misses_before_gone` consecutive scrapes without a sighting. That
+> assumes each scrape covers the same ground — so if you run `--pages 1` after a
+> 3-page run, the listings you didn't reach accrue misses and can be marked gone
+> while still live. Keep the page depth consistent between runs.
+
 ## The dashboard
 
 - **Header:** total listings, active, new in 24h, median price, gone (likely sold)
@@ -82,7 +111,7 @@ markup change in one marketplace can't break the other.
 
 ### Verified behaviour
 
-A single-page Kijiji sweep returns **~259 listings** and resolves them into
+A single-page Kijiji sweep returns **~260 listings** and resolves them into
 products (`RTX 3080` ×27, `RTX 3070` ×18, `RTX 4090` ×14, …). Running it twice
 adds **0** new rows and refreshes **259** — deduplication and tracking work.
 
@@ -98,7 +127,7 @@ deal-sniper/
 │   ├── engines/              # resolver + listing_guard
 │   ├── models/schema.py      # RawListing
 │   ├── db/store.py           # SQLite persistence
-│   └── tests/                # 62 tests
+│   └── tests/                # 70 tests
 ├── kijiji-scraper/           # self-contained scraper project
 ├── craigslist-scraper/       # self-contained scraper project
 ├── archive/engine-docs/      # the archived valuation engine's documentation
@@ -108,13 +137,14 @@ deal-sniper/
 ## Tests
 
 ```bash
-cd app && python -m pytest -q      # 62 passed
+cd app && python -m pytest -q      # 70 passed
 ```
 
 Covers the store's persistence and disappearance tracking, the product resolver,
-the listing guard, the scrape helpers, and a real render of the dashboard via
-Streamlit's `AppTest` — including clicking **Run scrape now** and asserting it
-invokes the scraper CLI against the right database.
+the listing guard, the scrape helpers, Craigslist listing-id parsing, and a real
+render of the dashboard via Streamlit's `AppTest` — including clicking
+**Run scrape now** and asserting it invokes the scraper CLI against the right
+database.
 
 ## Scope and compliance
 

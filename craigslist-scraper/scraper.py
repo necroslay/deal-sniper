@@ -355,12 +355,20 @@ class CraigslistScraper:
                 rel_el.get_text(strip=True) if rel_el else ""
             )
 
-        # Listing ID — current layout carries it on the card's data-pid attribute
+        # Listing ID — the current layout carries it on the card's data-pid
+        # attribute. Craigslist URLs now use an opaque token
+        # (".../view/d/<slug>/<token>") rather than the id, so that token is the
+        # only usable fallback. (The old "/<id>.html" pattern is retained as a
+        # last resort but Craigslist no longer emits it — measured 0/55 live.)
         listing_id = (item.get("data-pid") or "").strip()
         if not listing_id and url:
-            id_match = re.search(r'/(\d+)\.html', url)
-            if id_match:
-                listing_id = id_match.group(1)
+            token_match = re.search(r"/view/d/[^/]+/([A-Za-z0-9_-]+)", url)
+            if token_match:
+                listing_id = token_match.group(1)
+            else:
+                legacy_match = re.search(r"/(\d+)\.html", url)
+                if legacy_match:
+                    listing_id = legacy_match.group(1)
 
         # Image
         image_urls = [
