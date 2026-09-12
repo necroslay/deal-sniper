@@ -49,8 +49,8 @@ keeps them separate.
 | **Live sources** | Kijiji, Craigslist |
 | **Gated (not built)** | eBay, Facebook Marketplace — both require accounts |
 | **Last verified run** | 867 listings scraped, 867 decisions scored, both sources live (2 pass the alert gate) |
-| **Tests** | 180 engine tests + 39 scraper-parser tests, all passing |
-| **Known bottleneck** | Comp *data access* — no free source exposes real sold comps (eBay gated, PriceCharting/130point behind Cloudflare). A lifecycle "disappearance" proxy exists but is off by default |
+| **Tests** | 203 engine tests + 39 scraper-parser tests, all passing |
+| **Known bottleneck** | Comp *data access* — no free source exposes real sold comps (eBay gated, PriceCharting/130point behind Cloudflare). Two weaker fallbacks exist: a lifecycle "disappearance" proxy (off by default) and new-retail anchoring (`FMV = retail × M_condition`) |
 
 Full detail, including tech debt and honest caveats, is in
 [`PROJECT_STATUS.md`](PROJECT_STATUS.md). **Read it before presenting this
@@ -66,13 +66,16 @@ cd app
 pip install -r requirements.txt
 
 # 2. Run the test suite (no network needed)
-python -m pytest -q                      # 180 passed
+python -m pytest -q                      # 203 passed
 
 # 3. Run the full pipeline: scrape live -> value -> persist (accumulating DB)
 python run_full_pipeline.py
 
 # 3b. Demo mode: synthetic comps, self-contained DB (do NOT draw conclusions)
 python run_full_pipeline.py --fresh --seed-demo
+
+# 3c. Load new-retail prices so products without sold comps can still be valued
+python -m app.tools.import_retail_prices --file retail.csv
 
 # 4. Serve the API
 uvicorn app.main:app --port 8000

@@ -163,6 +163,36 @@ class LifecycleConfig:
 
 
 @dataclass
+class RetailConfig:
+    """New-retail price reference — used when no sold comps exist.
+
+    Retail is a **ceiling**, not a market value. A used item is worth some
+    fraction of new, which the condition multipliers already express
+    (``used_good = 0.82``). So retail-anchored valuation is simply
+    ``FMV = retail_price × M_condition``.
+
+    This is deliberately treated as **weaker evidence** than sold comps: no
+    transaction has been observed at this price, only a purchase option. Every
+    valuation built this way is tagged ``basis="retail"``, carries the
+    ``retail_basis`` risk flag, and can never reach ``ALERT_IMMEDIATE``.
+    ``DECISIONS.md`` D1 still holds — retail is not an asking price on the item
+    being valued, and it is never presented as a completed sale.
+    """
+    enabled: bool = True
+    max_age_days: int = 45          # staleness limit for a retail reference
+    allow_alerts: bool = True       # may a retail-basis deal raise an alert?
+    confidence_cap: str = "ALERT_CAUTION"  # never IMMEDIATE without sold comps
+    # Confidence score (0-100) assigned to a retail-anchored valuation. Sold-comp
+    # valuations derive this from comp volume; a retail anchor has no comps, so it
+    # gets a fixed, deliberately mid-tier value instead of the zero-comp default.
+    confidence_score: float = 65.0
+    # Lower bound of the retail-derived FMV interval. A new price pins the top
+    # of the range; how far a used unit sits below it is uncertain, so the
+    # interval is (retail_fmv × this, retail_fmv).
+    fmv_interval_low_pct: float = 0.85
+
+
+@dataclass
 class AppConfig:
     """Top-level config aggregating all sub-configs."""
     platform_fees: PlatformFees = field(default_factory=PlatformFees)
@@ -178,6 +208,7 @@ class AppConfig:
     alert_gate: AlertGate = field(default_factory=AlertGate)
     scraper_sources: ScraperSourceConfig = field(default_factory=ScraperSourceConfig)
     lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
+    retail: RetailConfig = field(default_factory=RetailConfig)
     currency: str = "CAD"
     country: str = "CA"
 

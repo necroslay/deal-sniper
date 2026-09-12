@@ -97,6 +97,22 @@ class FairValueEstimate(BaseModel):
     condition_confidence: float = 0.0
     comps_used: int = 0
     comp_band: Optional[CompBand] = None
+    # What the valuation is anchored to:
+    #   "sold_comps" — observed completed sales (strongest evidence)
+    #   "retail"     — new-retail price × condition multiplier (a ceiling, not a
+    #                  transaction; weaker evidence, see config.RetailConfig)
+    #   "none"       — no basis available, fmv_cad is 0
+    basis: str = "none"
+    retail_reference_cad: float = 0.0
+
+
+class RetailPrice(BaseModel):
+    """A new-retail price observed for a canonical product."""
+    product_key: str
+    price_cad: float
+    retailer: str = ""
+    url: str = ""
+    observed_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 
 
 class RealizedValue(BaseModel):

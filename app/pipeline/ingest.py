@@ -28,7 +28,7 @@ from app.engines.condition import classify_condition
 from app.engines.adjustments import detect_adjustments
 from app.engines.listing_guard import assess_listing
 from app.engines.comp_engine import compute_comp_band, has_sufficient_comps
-from app.valuation.fair_value import compute_fmv
+from app.valuation.fair_value import compute_fmv, compute_fmv_from_retail
 from app.valuation.realize import compute_erv
 from app.valuation.score import compute_deal_score
 from app.valuation.gate import passes_alert_gate
@@ -179,12 +179,38 @@ class IngestionPipeline:
         adjustments = detect_adjustments(
             raw_listing.title, raw_listing.description or ""
         )
-        fair_value = compute_fmv(
-            comp_band=band,
-            condition=condition_result.grade.value,
-            trend_multiplier=1.0,
-            adjustments=adjustments,
-        )
+
+        fair_value = None
+        if band.count > 0:
+            # Preferred basis: observed completed sales.
+            fair_value = compute_fmv(
+                comp_band=band,
+                condition=condition_result.grade.value,
+                trend_multiplier=1.0,
+                adjustments=adjustments,
+            )
+        elif CFG.retail.enabled and self.store:
+            # No sold comps for this product. Fall back to the new-retail
+            # ceiling (FMV = retail × M_condition), clearly tagged
+            # basis="retail" and capped below ALERT_IMMEDIATE downstream.
+            retail_quote = self.store.get_retail_price(
+                product.standard_name, max_age_days=CFG.retail.max_age_days)
+            if retail_quote:
+                fair_value = compute_fmv_from_retail(
+                    retail_price_cad=retail_quote.price_cad,
+                    condition=condition_result.grade.value,
+                    trend_multiplier=1.0,
+                    adjustments=adjustments,
+                )
+
+        if fair_value is None:
+            # No comps and no retail reference: FMV is zero (and flagged).
+            fair_value = compute_fmv(
+                comp_band=band,
+                condition=condition_result.grade.value,
+                trend_multiplier=1.0,
+                adjustments=adjustments,
+            )
 
         # Stage 5: Expected Resale Value (realization costs)
         platform = raw_listing.source

@@ -35,6 +35,7 @@ Legend: ✅ works end-to-end · ⚠️ works with caveats · 🟡 partial / stub
 | Comp engine (IQR bands) | ✅ | Unit tested incl. explicit outlier fixture |
 | Listing lifecycle tracking | ✅ | `first_seen_at` / `last_seen_at` + miss counter; retires after N consecutive misses. Unit tested |
 | Inferred comps (disappearance proxy) | ⚠️ | Derived from retired listings at a config haircut; flagged `inferred`, **excluded from valuation by default** |
+| Retail-anchored valuation | ✅ | `FMV = retail × M_condition` when no comps exist; flagged `basis="retail"`, capped at `ALERT_CAUTION`. Unit tested |
 | FMV / ERV / Deal score | ✅ | Unit tested |
 | SQLite persistence | ✅ | `app/resale_engine.db`, 802 listings / 869 decisions / 265 comps |
 | FastAPI service | ⚠️ | Endpoints work, but **`/feedback` only logs — does not persist** |
@@ -79,7 +80,7 @@ ALERT_IMMEDIATE     0    (0%)
 
 ```bash
 # Unit tests (no network)
-cd app && python -m pytest -q                        # 180 passed
+cd app && python -m pytest -q                        # 203 passed
 cd craigslist-scraper && python -m pytest tests -q   # 39 passed
 
 # Full pipeline: seed comps -> scrape live -> value -> persist -> report
@@ -212,6 +213,36 @@ Guardrails, because this is evidence of *absence*, not proof of a sale:
 
 The method needs repeated runs to accumulate, which is why `run_full_pipeline.py`
 no longer deletes the database by default (see `--fresh`).
+
+### Retail-anchored valuation (added 2026-09-12)
+
+When no sold comps cover a product, the pipeline falls back to the **new-retail
+price**: ``FMV = retail × M_condition``. This is what makes "compare the asking
+price to retail" concrete, and it is the option taken after the finding above.
+
+It is a weaker basis, and the code says so at every step:
+
+- results are tagged ``fair_value.basis = "retail"`` and carry the ``retail_basis``
+  risk flag on the decision;
+- ``comps_used`` stays **0** — no comps were consulted, and claiming otherwise
+  would be a lie that propagates into the alert payload;
+- the confidence tier is capped at ``ALERT_CAUTION`` (``retail.confidence_cap``);
+  a retail anchor can never produce ``ALERT_IMMEDIATE``;
+- sold comps always take precedence when they exist.
+
+Retail is a **ceiling**, not a price: a rational buyer will not pay more used than
+the best new alternative, so it bounds value from above, and the condition
+multiplier supplies the new→used discount.
+
+Prices are supplied explicitly. There is no reliable free scrape for retail
+either — Canada Computers and Vuugo respond, but Memory Express (Cloudflare),
+Newegg (CAPTCHA), Amazon and Best Buy (denied) are blocked, and PCPP's price grid
+is served from a soft-gated internal API that returns "PCPartPicker is
+unavailable" and contains **no used data** anyway:
+
+```bash
+python -m app.tools.import_retail_prices --file retail.csv
+```
 
 ---
 

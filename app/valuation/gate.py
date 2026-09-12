@@ -21,16 +21,27 @@ def passes_alert_gate(output: ValuationOutput) -> bool:
     * expected profit ≥ ``CFG.alert_gate.min_expected_profit_cad``
     * margin ≥ ``CFG.alert_gate.min_margin_pct``
     * confidence tier is ``ALERT_IMMEDIATE`` or ``ALERT_CAUTION``
-    * at least ``CFG.alert_gate.min_comps`` comps backed the valuation
+    * evidence is sufficient for the valuation's *basis*
 
-    The comp-count condition matters: a large "discount" computed from two comps
-    is noise, so the gate refuses to act on thin evidence.
+    The last condition is where the two bases differ. A comp-backed valuation
+    needs at least ``CFG.alert_gate.min_comps`` comps — a large "discount"
+    computed from two sales is noise. A retail-anchored valuation has no comps by
+    construction (``basis="retail"``, ``comps_used=0``), so requiring comps would
+    mean it could never alert; it is gated on ``CFG.retail.allow_alerts``
+    instead, and its confidence is already capped below ``ALERT_IMMEDIATE``.
     """
     gate = CFG.alert_gate
     ds = output.deal_score
+    basis = output.fair_value.basis
+
+    if basis == "retail":
+        evidence_ok = CFG.retail.enabled and CFG.retail.allow_alerts
+    else:
+        evidence_ok = output.fair_value.comps_used >= gate.min_comps
+
     return (
         ds.expected_profit_cad >= gate.min_expected_profit_cad
         and ds.margin_pct >= gate.min_margin_pct * 100
         and ds.confidence_level.value in ("ALERT_IMMEDIATE", "ALERT_CAUTION")
-        and output.fair_value.comps_used >= gate.min_comps
+        and evidence_ok
     )

@@ -250,6 +250,20 @@ print("=" * 60)
 coverage_pct = (fmv_count / decisions_total * 100) if decisions_total else 0.0
 print(f"  FMV coverage: {fmv_count} / {decisions_total} decisions ({coverage_pct:.0f}%)")
 
+# How that coverage was achieved. "retail" means valued from a new-retail
+# reference (FMV = retail × condition multiplier) rather than observed sales —
+# weaker evidence, and never allowed above ALERT_CAUTION.
+basis_counts: dict = {}
+for r in results:
+    basis_counts[r.fair_value.basis] = basis_counts.get(r.fair_value.basis, 0) + 1
+print("  Basis breakdown:  " +
+      "  ".join(f"{k}={v}" for k, v in sorted(basis_counts.items())))
+
+retail_products = cur.execute(
+    "SELECT COUNT(DISTINCT product_key) AS n FROM retail_prices").fetchone()["n"]
+print(f"  Retail references: {retail_products} product(s) "
+      f"(import with: python -m app.tools.import_retail_prices --file <csv|json>)")
+
 # Comp origins: synthetic rows are created only by --seed-demo; inferred rows
 # come from the listing lifecycle and are excluded from valuation unless enabled.
 origin = store.count_comps_by_origin()

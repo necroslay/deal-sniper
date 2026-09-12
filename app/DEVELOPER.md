@@ -97,11 +97,12 @@ app/
 +-- models/schema.py          # Pydantic v2 models
 +-- pipeline/ingest.py        # Pipeline orchestrator
 +-- pipeline/lifecycle_cycle.py # Observe/retire/infer cycle (shared)
++-- tools/import_retail_prices.py # Import new-retail reference prices
 +-- valuation/
 |   +-- fair_value.py         # FMV computation
 |   +-- realize.py            # ERV computation
 |   +-- score.py              # Deal score computation
-+-- tests/ (15 files, 180 tests)
++-- tests/ (16 files, 203 tests)
 +-- config.py                 # Central config (16 sections)
 +-- main.py                   # FastAPI app (5 endpoints)
 +-- dashboard.py              # Streamlit dashboard
@@ -142,6 +143,7 @@ CFG.condition_multipliers.used_good  # 0.82
 | alert_gate | profit $50, margin 15%, min 5 comps | Alert thresholds |
 | scraper_sources | pages/source, delays 1.5-3s | Scrape config |
 | lifecycle | 3 misses, 5% haircut, inferred off | Disappearance-inferred comps |
+| retail | enabled, 45-day staleness, alerts on, cap CAUTION | New-retail valuation fallback |
 
 ### Changing config at runtime
 
@@ -461,7 +463,7 @@ python -m pytest
 python -m pytest -v --tb=short  # verbose with short traceback
 ```
 
-180 tests across 15 files.
+203 tests across 16 files.
 
 ### Run specific file
 
@@ -508,7 +510,7 @@ python -m pytest tests/test_fair_value.py -v --tb=short
 
 ### Smoke test checklist
 
-- [ ] `python -m pytest` -- all 180 tests pass
+- [ ] `python -m pytest` -- all 203 tests pass
 - [ ] `python -c "from app.main import app"` -- app loads
 - [ ] POST /valuate with timezone-aware comps returns FMV > 0
 - [ ] POST /health returns healthy
@@ -610,6 +612,10 @@ Q1=450, Q3=580, IQR=130. Lower=450-1.5*130=255, Upper=580+1.5*130=775. Removes 1
 | lifecycle.misses_before_gone | 3 | Consecutive absent scrapes before a listing is presumed sold |
 | lifecycle.inferred_comp_haircut_pct | 0.05 | Discount applied to the last asking price for an inferred comp |
 | lifecycle.use_inferred_comps | False | Whether inferred comps may enter valuation (off by default) |
+| retail.enabled | True | Use new-retail prices as a valuation basis when no comps exist |
+| retail.max_age_days | 45 | How stale a retail reference may be |
+| retail.allow_alerts | True | Whether a retail-basis deal may raise an alert |
+| retail.confidence_cap | ALERT_CAUTION | Highest tier a retail-anchored valuation may reach |
 
 ---
 

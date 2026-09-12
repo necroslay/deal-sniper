@@ -52,6 +52,10 @@ def compute_deal_score(
     Returns: DealScore with all component scores and metadata.
     """
     risk = list(risk_flags or [])
+    # A retail-anchored valuation is not comp evidence. Label it on the decision
+    # itself so it is never read as a completed sale (see config.RetailConfig).
+    if fair_value.basis == "retail" and "retail_basis" not in risk:
+        risk.append("retail_basis")
     erv = realized_value.erv_cad
     fmv = fair_value.fmv_cad
 
@@ -81,8 +85,11 @@ def compute_deal_score(
         else: urgency_score = 10.0
 
     # ── Confidence Score (0–100) ───────────────────────────────────────────
-    confidence_base = 70.0
-    if comp_band.count >= 20: confidence_base = 90.0
+    if fair_value.basis == "retail":
+        # No comps back this valuation — the anchor is a new-retail price. Using
+        # the comp-count ladder would wrongly score it as zero-comp evidence.
+        confidence_base = CFG.retail.confidence_score
+    elif comp_band.count >= 20: confidence_base = 90.0
     elif comp_band.count >= 10: confidence_base = 80.0
     elif comp_band.count >= 5: confidence_base = 65.0
     else: confidence_base = 40.0
@@ -105,7 +112,7 @@ def compute_deal_score(
     # ── Confidence Level ──────────────────────────────────────────────────
     avg_confidence = (confidence_score / 100.0)
     confidence_level = _assign_confidence_level(
-        avg_confidence, comp_band.count, margin_score
+        avg_confidence, comp_band.count, margin_score, fair_value.basis
     )
 
     # ── Recommendations ───────────────────────────────────────────────────
@@ -173,8 +180,28 @@ def _compute_penalties(risk_flags: list[str], travel_distance_km: float) -> floa
     return total
 
 
-def _assign_confidence_level(avg_confidence: float, comp_count: int, margin_score: float) -> ConfidenceLevel:
+def _assign_confidence_level(avg_confidence: float, comp_count: int,
+                             margin_score: float,
+                             basis: str = "sold_comps") -> ConfidenceLevel:
+    """Map a valuation's confidence to a triage tier.
+
+    Comp-backed valuations must clear ``min_comps`` before they can alert — a big
+    discount computed from two sales is noise. Retail-anchored valuations have no
+    comps at all, so they are handled separately and can never exceed
+    ``retail.confidence_cap`` (``ALERT_CAUTION`` by default): retail is a ceiling
+    on value, not evidence of one.
+    """
     gate = CFG.alert_gate
+
+    if basis == "retail":
+        cap = CFG.retail.confidence_cap
+        if (avg_confidence >= gate.confidence_alert_caution
+                and cap in ("ALERT_CAUTION", "ALERT_IMMEDIATE")):
+            return ConfidenceLevel.alert_caution
+        if avg_confidence >= gate.confidence_review:
+            return ConfidenceLevel.review
+        return ConfidenceLevel.suppress
+
     if avg_confidence >= gate.confidence_alert_immediate and comp_count >= gate.min_comps and margin_score >= 20:
         return ConfidenceLevel.alert_immediate
     if avg_confidence >= gate.confidence_alert_caution and comp_count >= gate.min_comps:

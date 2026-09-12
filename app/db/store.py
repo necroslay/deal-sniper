@@ -6,7 +6,14 @@ from pathlib import Path
 from typing import Optional
 from app.config import CFG
 from app.engines.resolver import resolve_product
-from app.models.schema import FeedbackEvent, Platform, RawListing, SoldComp, ValuationOutput
+from app.models.schema import (
+    FeedbackEvent,
+    Platform,
+    RawListing,
+    RetailPrice,
+    SoldComp,
+    ValuationOutput,
+)
 from app.valuation.gate import passes_alert_gate
 logger = logging.getLogger("store")
 DB = str(Path(__file__).resolve().parent.parent / "resale_engine.db")
@@ -59,7 +66,13 @@ CREATE TABLE IF NOT EXISTS sold_comps (
     scraped_at TEXT, product_key TEXT,
     inferred INTEGER NOT NULL DEFAULT 0,
     UNIQUE(source, source_listing_id));
-CREATE INDEX IF NOT EXISTS idx_comps_name ON sold_comps(title);"""
+CREATE TABLE IF NOT EXISTS retail_prices (
+    id TEXT PRIMARY KEY, product_key TEXT NOT NULL,
+    price_cad REAL NOT NULL, retailer TEXT NOT NULL DEFAULT '',
+    url TEXT NOT NULL DEFAULT '', observed_at TEXT NOT NULL,
+    UNIQUE(product_key, retailer));
+CREATE INDEX IF NOT EXISTS idx_comps_name ON sold_comps(title);
+CREATE INDEX IF NOT EXISTS idx_retail_product ON retail_prices(product_key);"""
 
 class Store:
     def __init__(self, db=DB):
@@ -354,6 +367,63 @@ class Store:
             "FROM sold_comps"
         ).fetchone()
         return {k: int(row[k] or 0) for k in ("real", "inferred", "synthetic")}
+
+    # ── Retail price reference ──────────────────────────────────────────────
+
+    def insert_retail_price(self, retail: RetailPrice) -> bool:
+        """Upsert a new-retail price for ``(product_key, retailer)``.
+
+        Prices move, so unlike comps this is an upsert rather than an ignore: a
+        re-scrape refreshes the price and timestamp instead of being dropped.
+
+        Returns True if a row was written.
+        """
+        self._check()
+        self._cur.execute(
+            "INSERT INTO retail_prices "
+            "(id, product_key, price_cad, retailer, url, observed_at) "
+            "VALUES (?,?,?,?,?,?) "
+            "ON CONFLICT(product_key, retailer) DO UPDATE SET "
+            "price_cad = excluded.price_cad, url = excluded.url, "
+            "observed_at = excluded.observed_at",
+            (str(uuid.uuid4()), retail.product_key, retail.price_cad,
+             retail.retailer or "", retail.url or "", retail.observed_at))
+        self._conn.commit()
+        return self._cur.rowcount > 0
+
+    def get_retail_prices(self, product_key=None, max_age_days=None,
+                          limit=50) -> list[RetailPrice]:
+        """Return retail quotes, cheapest first.
+
+        Cheapest-first is deliberate: the relevant ceiling for "should I buy this
+        used one?" is the *best new alternative*, not the most expensive.
+        """
+        self._check()
+        clauses = []
+        params: list = []
+        if product_key:
+            clauses.append("product_key = ?")
+            params.append(product_key)
+        if max_age_days:
+            cutoff = (datetime.now(timezone.utc)
+                      - timedelta(days=max_age_days)).isoformat()
+            clauses.append("observed_at >= ?")
+            params.append(cutoff)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        rows = self._cur.execute(
+            f"SELECT * FROM retail_prices {where} "
+            f"ORDER BY price_cad ASC LIMIT ?", params + [limit]).fetchall()
+        return [RetailPrice(
+            product_key=r["product_key"], price_cad=r["price_cad"],
+            retailer=r["retailer"] or "", url=r["url"] or "",
+            observed_at=r["observed_at"]) for r in rows]
+
+    def get_retail_price(self, product_key, max_age_days=None
+                         ) -> Optional[RetailPrice]:
+        """Return the cheapest fresh retail quote for *product_key*, or None."""
+        quotes = self.get_retail_prices(product_key=product_key,
+                                        max_age_days=max_age_days, limit=1)
+        return quotes[0] if quotes else None
 
     def insert_decision(self, output):
         self._check(); did = str(uuid.uuid4())
