@@ -157,6 +157,35 @@ Implementation notes worth knowing:
 
 **Result: 54/54 listings acquired dates, up from 2/54.**
 
+### eBay — completed-sales access is gated (verified 2026-09-12)
+
+The eBay scraper is the *only* path in this repo that has never produced a
+listing, and the reason is now pinned down by direct testing rather than
+inferred:
+
+| Access attempt | Result |
+|---|---|
+| `requests` GET, **sold** search (`LH_Sold=1&LH_Complete=1`) | HTTP 200, but a **"Sign in or Register"** interstitial — zero listing markup |
+| `requests` GET, **active** search | HTTP **403**, **"Error Page"** |
+| Headless **real Chrome** (Playwright, `channel="chrome"`) on the sold URL | **"Error Page"**, 1.8 KB, zero rows |
+| PriceCharting search (documented fallback) | HTTP 403, **Cloudflare "Just a moment…"** — not cleared by a real-Chrome render either |
+| Swappa search (documented fallback) | HTTP 200, GPU product pages exist — but **asking prices only; no sold/average prices exposed** |
+
+**Conclusion.** There is no reachable, free, *automated* source of real GPU
+**completed-sales** data today. eBay gates completed listings behind
+authentication and detects headless browsers; the games/consoles fallback
+(PriceCharting) sits behind a Cloudflare challenge; and the one reachable
+marketplace (Swappa) exposes only asking prices, which `DECISIONS.md` D1
+explicitly forbids using as ground truth.
+
+This is why §2 lists eBay as 🟡, and it means the binding constraint is **comp
+*data access***, not scraper code. Compliant options: (a) a provider interface
+fed by real comps the operator supplies (CSV / manual entry), (b) eBay's official
+APIs — Browse is free, but Marketplace Insights for sold data requires approval —
+with operator-supplied credentials, or (c) a paid sold-comp provider. Bypassing
+the anti-bot measures was **rejected**: it contradicts the compliance stance in
+`copilotinstructions.md` §10.
+
 ---
 
 ## 6. Known discrepancies and tech debt
