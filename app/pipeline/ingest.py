@@ -122,6 +122,12 @@ class IngestionPipeline:
             )
             if persist and self.store:
                 try:
+                    # Persist the listing *before* its decision. A rejected
+                    # listing is still worth keeping for audit, and the decision
+                    # row's ``listing_id`` must always resolve to a parent listing
+                    # (Postgres enforces this with a FK that SQLite silently
+                    # ignores — without this, 169 decisions were orphaned).
+                    self.store.insert_listing(raw_listing)
                     self.store.insert_decision(output)
                 except Exception:
                     pass
