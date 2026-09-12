@@ -1,5 +1,13 @@
-"""Full pipeline: seed comps, scrape 200, process, break down."""
-import sys, pathlib, logging
+"""Full pipeline: (optionally) seed comps, scrape live, process, break down.
+
+By default the run is honest: it uses only real comps already in the database
+and it **does not** delete the database. Two opt-in flags change that:
+
+* ``--fresh``      delete and rebuild the database (self-contained demo run)
+* ``--seed-demo``  insert synthetic ``BASELINE_COMPS`` so a demo produces output
+                   without real sold data. Never use this to draw conclusions.
+"""
+import sys, pathlib, logging, argparse
 sys.path.insert(0, str(pathlib.Path("c:/Users/nelso/Projects/deal-sniper")))
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
 
@@ -11,67 +19,54 @@ from collections import Counter
 
 DB_PATH = pathlib.Path("c:/Users/nelso/Projects/deal-sniper") / "app" / "resale_engine.db"
 
-# Remove old database so each run starts fresh
-if DB_PATH.exists():
+parser = argparse.ArgumentParser(description="Run the deal-sniper pipeline.")
+parser.add_argument("--fresh", action="store_true",
+                    help="Delete the existing database and rebuild from scratch.")
+parser.add_argument("--seed-demo", action="store_true",
+                    help="Seed synthetic BASELINE_COMPS. Real runs should omit this.")
+args = parser.parse_args()
+
+# The database accumulates across runs by default. --fresh makes the run
+# self-contained (which is what a throwaway demo wants, and what a real
+# accumulating store very much does not).
+if args.fresh and DB_PATH.exists():
     DB_PATH.unlink()
-    print(">> Removed old database")
+    print(">> Removed old database (--fresh)")
 
 store = Store()
 store.connect()
 
-# ── Step 1: Seed baseline comps ──────────────────────────────────────────
+# ── Step 1: Seed comps (opt-in only) ─────────────────────────────────────
 print("=" * 60)
-print("STEP 1: Seeding baseline comps")
+print("STEP 1: Seeding comps")
 print("=" * 60)
 
-BASELINE_COMPS = {
-    "RTX 4090": [2200, 2350, 2400, 2450, 2500, 2550, 2600, 2650, 2700, 2750, 2800, 2850, 2900, 3000, 3200],
-    "RTX 4080 Super": [1500, 1550, 1600, 1650, 1700, 1750, 1800, 1850, 1900, 1950],
-    "RTX 4080": [1200, 1250, 1300, 1350, 1400, 1450, 1500, 1550, 1600, 1650],
-    "RTX 4070 Ti Super": [900, 950, 1000, 1050, 1100, 1150, 1200, 1250, 1300, 1350],
-    "RTX 4070": [700, 750, 800, 850, 900, 950, 1000, 1050, 1100, 1150],
-    "RTX 3080": [450, 480, 500, 520, 540, 560, 580, 600, 620, 650],
-    "RTX 3080 Ti": [550, 580, 600, 620, 640, 660, 680, 700, 720, 750],
-    "RTX 3070": [350, 380, 400, 420, 440, 460, 480, 500, 520, 540],
-    "RTX 3070 Ti": [400, 430, 450, 470, 490, 510, 530, 550, 570, 590],
-    "RTX 3060 Ti": [300, 320, 340, 360, 380, 400, 420, 440, 460, 480],
-    "RTX 3060": [200, 220, 240, 260, 280, 300, 320, 340, 360, 380],
-    "RTX 2070": [180, 200, 220, 240, 260, 280, 300, 320, 340, 360],
-    "GTX 1660 Super": [120, 130, 140, 150, 160, 170, 180, 190, 200, 210],
-    "GTX 1660": [100, 110, 120, 130, 140, 150, 160, 170, 180, 190],
-    "GTX 1070": [100, 110, 120, 130, 140, 150, 160, 170, 180, 190],
-    "GTX 1080": [130, 140, 150, 160, 170, 180, 190, 200, 210, 220],
-    "GTX 1080 Ti": [180, 200, 220, 240, 260, 280, 300, 320, 340, 360],
-    "RX 7900 XTX": [900, 950, 1000, 1050, 1100, 1150, 1200, 1250, 1300, 1350],
-    "RX 7900 XT": [750, 800, 850, 900, 950, 1000, 1050, 1100, 1150, 1200],
-    "RX 7800 XT": [550, 580, 600, 620, 640, 660, 680, 700, 720, 750],
-    "RX 6800 XT": [400, 430, 450, 470, 490, 510, 530, 550, 570, 590],
-    "RX 6800": [350, 370, 390, 410, 430, 450, 470, 490, 510, 530],
-    "RX 580": [60, 70, 80, 90, 100, 110, 120, 130, 140, 150],
-    "PlayStation 5": [350, 370, 380, 400, 420, 430, 440, 450, 460, 480],
-    "PS5 Pro": [600, 650, 700, 750, 800, 850, 900, 950, 1000, 1050],
-    "Nintendo Switch OLED": [250, 260, 270, 280, 290, 300, 310, 320, 330, 340],
-}
-
-total_comps = 0
-base = datetime.now(timezone.utc) - timedelta(days=60)
-for product, prices in BASELINE_COMPS.items():
-    for i, price in enumerate(prices):
-        comp = SoldComp(
-            source=Platform.ebay,
-            source_listing_id=f"baseline_{product.replace(' ','_')}_{i}",
-            title=f"{product} {i}",
-            sold_price_cad=float(price),
-            sold_date=(base - timedelta(days=i * 3)).isoformat(),
-            condition="used_good",
-            # We already know the canonical product here; set it explicitly so the
-            # comp does not depend on the resolver re-deriving it from the title.
-            product_key=product,
-        )
-        if store.insert_sold_comp(comp):
-            total_comps += 1
-    print(f"  {product:<20s} {len(prices):>2} comps")
-print(f"Total comps seeded: {total_comps}")
+if args.seed_demo:
+    from app.tests.fixtures.baseline_comps import BASELINE_COMPS
+    print("!! --seed-demo: inserting SYNTHETIC baseline comps (NOT real sold data)")
+    total_comps = 0
+    base = datetime.now(timezone.utc) - timedelta(days=60)
+    for product, prices in BASELINE_COMPS.items():
+        for i, price in enumerate(prices):
+            comp = SoldComp(
+                source=Platform.ebay,
+                source_listing_id=f"baseline_{product.replace(' ','_')}_{i}",
+                title=f"{product} {i}",
+                sold_price_cad=float(price),
+                sold_date=(base - timedelta(days=i * 3)).isoformat(),
+                condition="used_good",
+                # Product is already known here; set it explicitly so the comp does
+                # not depend on the resolver re-deriving it from the title.
+                product_key=product,
+            )
+            if store.insert_sold_comp(comp):
+                total_comps += 1
+        print(f"  {product:<20s} {len(prices):>2} comps")
+    print(f"Total comps seeded: {total_comps}")
+else:
+    print(">> Not seeding synthetic comps.")
+    print("   Using real sold comps already in the database (none on a fresh DB).")
+    print("   Pass --seed-demo for a synthetic demo dataset.")
 
 # ── Step 2: Scrape live listings from every working source ───────────────
 print("\n" + "=" * 60)
@@ -221,7 +216,37 @@ print(f"  Comps: {cur.fetchone()[0]}")
 # Also show how many products got FMV > 0
 cur.execute("SELECT COUNT(*) FROM valuation_decisions WHERE fmv_cad > 0")
 fmv_count = cur.fetchone()[0]
-print(f"  Decisions with FMV>0: {fmv_count} / {len(results)}")
+decisions_total = cur.execute("SELECT COUNT(*) FROM valuation_decisions").fetchone()[0]
+print(f"  Decisions with FMV>0: {fmv_count} / {decisions_total}")
+
+# ── Coverage: the real bottleneck ────────────────────────────────────────
+# A listing with no comps for its exact product is suppressed no matter how good
+# the deal looks, so comp coverage — not scraper throughput — bounds this system.
+print("\n" + "=" * 60)
+print("COVERAGE (the binding constraint)")
+print("=" * 60)
+coverage_pct = (fmv_count / decisions_total * 100) if decisions_total else 0.0
+print(f"  FMV coverage: {fmv_count} / {decisions_total} decisions ({coverage_pct:.0f}%)")
+
+# Real vs synthetic comps. Synthetic rows are only ever created by --seed-demo.
+real_comps = cur.execute(
+    "SELECT COUNT(*) FROM sold_comps WHERE source_listing_id NOT LIKE 'baseline_%'"
+).fetchone()[0]
+synth_comps = cur.execute(
+    "SELECT COUNT(*) FROM sold_comps WHERE source_listing_id LIKE 'baseline_%'"
+).fetchone()[0]
+print(f"  Comps by origin:  real={real_comps}  synthetic={synth_comps}")
+if real_comps == 0:
+    print("  !! No real sold comps ingested — every valuation rests on synthetic data.")
+
+# Comps per product, with a marker where coverage is below the gate.
+print("\n  Comps per product (top 15):")
+for product, n in cur.execute(
+    "SELECT product_key, COUNT(*) AS n FROM sold_comps "
+    "GROUP BY product_key ORDER BY n DESC LIMIT 15"
+).fetchall():
+    flag = "" if n >= 5 else "   <- below the 5-comp gate"
+    print(f"    {str(product):<30s} {n:>3}{flag}")
 
 store.close()
 print("\nDONE")
