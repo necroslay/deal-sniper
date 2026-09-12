@@ -75,11 +75,14 @@ A listing with **no id is refused** rather than stored: filing it under a blank
 key would let every subsequent id-less listing overwrite it silently, collapsing
 hundreds of rows into one with no error.
 
-> **Caveat on "gone".** A listing is retired after
-> `CFG.lifecycle.misses_before_gone` consecutive scrapes without a sighting. That
-> assumes each scrape covers the same ground — so if you run `--pages 1` after a
-> 3-page run, the listings you didn't reach accrue misses and can be marked gone
-> while still live. Keep the page depth consistent between runs.
+> **Retirement is coverage-aware.** A listing is retired after
+> `CFG.lifecycle.misses_before_gone` consecutive scrapes without a sighting. A
+> shallow sweep can't tell you anything about listings it never reached, so each
+> source's scrape depth is remembered and **a source swept less deeply than its
+> previous run is skipped entirely** — its unseen listings accrue no misses. So
+> `--pages 1` after a 3-page run *pauses* retirement for that source instead of
+> falsely retiring everything the deeper run had found. Depth is compared with the
+> **previous** run, so normal retirement resumes on the next equal-or-deeper run.
 
 ## The dashboard
 
@@ -127,7 +130,7 @@ deal-sniper/
 │   ├── engines/              # resolver + listing_guard
 │   ├── models/schema.py      # RawListing
 │   ├── db/store.py           # SQLite persistence
-│   └── tests/                # 70 tests
+│   └── tests/                # 77 tests
 ├── kijiji-scraper/           # self-contained scraper project
 ├── craigslist-scraper/       # self-contained scraper project
 ├── archive/engine-docs/      # the archived valuation engine's documentation
@@ -137,7 +140,7 @@ deal-sniper/
 ## Tests
 
 ```bash
-cd app && python -m pytest -q      # 70 passed
+cd app && python -m pytest -q      # 77 passed
 ```
 
 Covers the store's persistence and disappearance tracking, the product resolver,

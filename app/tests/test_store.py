@@ -89,6 +89,107 @@ class TestObservationCycle:
         assert statuses["craigslist"] == "active"
 
 
+class TestCoverageAwareRetirement:
+    """A shallow sweep must not retire listings it could never have reached.
+
+    Without this, running ``--pages 1`` after a 3-page run marks every
+    deep-page-only listing as "missing" and, after enough cycles, "gone" —
+    while it is still live.
+    """
+
+    def test_coverage_is_recorded_and_read_back(self, store):
+        assert store.previous_coverage("kijiji") is None
+        store.record_coverage({"kijiji": 3, "craigslist": 2})
+        assert store.previous_coverage("kijiji") == 3
+        assert store.previous_coverage("craigslist") == 2
+        store.record_coverage({"kijiji": 1})
+        assert store.previous_coverage("kijiji") == 1  # latest run wins
+
+    def _establish_depth(self, store, pages, source=Platform.kijiji):
+        """Run a cycle that records *pages* without retiring anything."""
+        return store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=99, sources=[source],
+            pages_by_source={source.value: pages})
+
+    def test_shallower_run_retires_nothing(self, store, make_listing):
+        store.observe_listing(make_listing("deep-only"))
+        self._establish_depth(store, 3)
+
+        res = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji],
+            pages_by_source={"kijiji": 1})
+
+        assert res["skipped_sources"] == ["kijiji"]
+        assert res["missed"] == 0 and res["gone"] == 0
+        assert store._cur.execute(
+            "SELECT status FROM raw_listings").fetchone()["status"] == "active"
+
+    def test_equal_depth_retires_normally(self, store, make_listing):
+        store.observe_listing(make_listing("a"))
+        self._establish_depth(store, 3)
+
+        res = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji],
+            pages_by_source={"kijiji": 3})
+
+        assert res["skipped_sources"] == []
+        assert res["gone"] == 1
+
+    def test_deeper_run_retires_normally(self, store, make_listing):
+        store.observe_listing(make_listing("a"))
+        self._establish_depth(store, 1)
+
+        res = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji],
+            pages_by_source={"kijiji": 5})
+
+        assert res["skipped_sources"] == []
+        assert res["gone"] == 1
+
+    def test_recovers_after_one_skipped_run(self, store, make_listing):
+        """Depth is compared to the *previous* run, so a shallow run is only a
+        one-cycle pause — not a permanent block."""
+        store.observe_listing(make_listing("a"))
+        self._establish_depth(store, 3)
+
+        skipped = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji],
+            pages_by_source={"kijiji": 1})
+        assert skipped["skipped_sources"] == ["kijiji"]
+        assert skipped["gone"] == 0
+
+        resumed = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1, sources=[Platform.kijiji],
+            pages_by_source={"kijiji": 1})
+        assert resumed["skipped_sources"] == []
+        assert resumed["gone"] == 1
+
+    def test_a_source_with_no_recorded_depth_is_unaffected(self, store,
+                                                           make_listing):
+        store.observe_listing(make_listing("c", source=Platform.craigslist))
+        res = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1,
+            sources=[Platform.craigslist], pages_by_source={"kijiji": 1})
+        assert res["skipped_sources"] == []
+        assert res["gone"] == 1
+
+    def test_only_the_shallow_source_is_skipped(self, store, make_listing):
+        store.observe_listing(make_listing("k", source=Platform.kijiji))
+        store.observe_listing(make_listing("c", source=Platform.craigslist))
+        store.record_coverage({"kijiji": 3, "craigslist": 2})
+
+        res = store.close_observation_cycle(
+            seen_keys=set(), misses_before_gone=1,
+            sources=[Platform.kijiji, Platform.craigslist],
+            pages_by_source={"kijiji": 1, "craigslist": 2})
+
+        assert res["skipped_sources"] == ["kijiji"]
+        statuses = {r["source"]: r["status"] for r in store._cur.execute(
+            "SELECT source, status FROM raw_listings")}
+        assert statuses["kijiji"] == "active"
+        assert statuses["craigslist"] == "gone"
+
+
 class TestReading:
     def test_all_listings_can_exclude_gone(self, store, make_listing):
         store.observe_listing(make_listing("a"))

@@ -34,7 +34,11 @@ SQL = """CREATE TABLE IF NOT EXISTS raw_listings (
     first_seen_at TEXT, last_seen_at TEXT,
     miss_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active', gone_at TEXT,
-    UNIQUE(source, source_listing_id));"""
+    UNIQUE(source, source_listing_id));
+CREATE TABLE IF NOT EXISTS scrape_coverage (
+    source TEXT PRIMARY KEY,
+    pages INTEGER NOT NULL,
+    observed_at TEXT NOT NULL);"""
 
 
 class Store:
@@ -170,8 +174,34 @@ class Store:
         self._conn.commit()
         return False
 
+    # ── scrape coverage ─────────────────────────────────────────────────────
+
+    def previous_coverage(self, source: str) -> Optional[int]:
+        """Pages scraped from *source* on the previous run, or None if unknown."""
+        self._check()
+        row = self._cur.execute(
+            "SELECT pages FROM scrape_coverage WHERE source = ?", (source,)
+        ).fetchone()
+        return int(row["pages"]) if row else None
+
+    def record_coverage(self, pages_by_source: dict) -> None:
+        """Remember how deep this run went, so the next run can compare.
+
+        Args:
+            pages_by_source: ``{"kijiji": 3, "craigslist": 2}``.
+        """
+        self._check()
+        now = datetime.now(timezone.utc).isoformat()
+        for source, pages in (pages_by_source or {}).items():
+            self._cur.execute(
+                "INSERT INTO scrape_coverage (source, pages, observed_at) "
+                "VALUES (?,?,?) ON CONFLICT(source) DO UPDATE SET "
+                "pages = excluded.pages, observed_at = excluded.observed_at",
+                (source, int(pages), now))
+        self._conn.commit()
+
     def close_observation_cycle(self, seen_keys, misses_before_gone: Optional[int] = None,
-                                sources=None) -> dict:
+                                sources=None, pages_by_source=None) -> dict:
         """Retire listings that have not reappeared for several scrapes.
 
         Args:
@@ -179,8 +209,15 @@ class Store:
             misses_before_gone: Override for the configured threshold.
             sources: Sources actually scraped. Only those are considered, so a
                 source that returned nothing cannot retire its whole inventory.
+            pages_by_source: Pages scraped per source this run. A source swept
+                **less deeply than its previous run is skipped** — a shallow
+                sweep is not evidence that anything is gone, so its unseen
+                listings must not accrue a miss. Without this, running
+                ``--pages 1`` after a 3-page run would falsely retire every
+                listing that only the deeper pages had reached.
 
-        Returns ``{"missed": n, "gone": n}``.
+        Returns:
+            ``{"missed": n, "gone": n, "skipped_sources": [names]}``.
         """
         self._check()
         threshold = (misses_before_gone if misses_before_gone is not None
@@ -188,31 +225,59 @@ class Store:
         now = datetime.now(timezone.utc).isoformat()
         seen = set(seen_keys or ())
 
-        sql = ("SELECT id, source, source_listing_id, miss_count FROM raw_listings "
-               "WHERE status = 'active'")
-        params: list = []
-        if sources:
-            srcs = [s.value if hasattr(s, "value") else str(s) for s in sources]
-            sql += " AND source IN (%s)" % ",".join("?" for _ in srcs)
-            params = srcs
+        candidates = [s.value if hasattr(s, "value") else str(s)
+                      for s in (sources or [])]
+
+        # Which sources may we draw conclusions from this run?
+        skipped_sources: list[str] = []
+        eligible = candidates
+        if candidates and pages_by_source:
+            eligible = []
+            for name in candidates:
+                current = pages_by_source.get(name)
+                previous = self.previous_coverage(name)
+                if current is not None and previous is not None and current < previous:
+                    skipped_sources.append(name)
+                else:
+                    eligible.append(name)
 
         missed = gone = 0
-        for row in self._cur.execute(sql, params).fetchall():
-            if (row["source"], row["source_listing_id"]) in seen:
-                continue
-            missed += 1
-            misses = (row["miss_count"] or 0) + 1
-            if misses >= threshold:
-                self._cur.execute(
-                    "UPDATE raw_listings SET miss_count = ?, status = 'gone', "
-                    "gone_at = ? WHERE id = ?", (misses, now, row["id"]))
-                gone += 1
-            else:
-                self._cur.execute(
-                    "UPDATE raw_listings SET miss_count = ? WHERE id = ?",
-                    (misses, row["id"]))
-        self._conn.commit()
-        return {"missed": missed, "gone": gone}
+
+        # An empty *candidates* list means "no source restriction", which is the
+        # historical behaviour; a non-empty list with nothing eligible means this
+        # run could not judge anything.
+        if eligible or not candidates:
+            sql = ("SELECT id, source, source_listing_id, miss_count "
+                   "FROM raw_listings WHERE status = 'active'")
+            params: list = []
+            if candidates:
+                sql += " AND source IN (%s)" % ",".join("?" for _ in eligible)
+                params = list(eligible)
+
+            for row in self._cur.execute(sql, params).fetchall():
+                if (row["source"], row["source_listing_id"]) in seen:
+                    continue
+                missed += 1
+                misses = (row["miss_count"] or 0) + 1
+                if misses >= threshold:
+                    self._cur.execute(
+                        "UPDATE raw_listings SET miss_count = ?, status = 'gone', "
+                        "gone_at = ? WHERE id = ?", (misses, now, row["id"]))
+                    gone += 1
+                else:
+                    self._cur.execute(
+                        "UPDATE raw_listings SET miss_count = ? WHERE id = ?",
+                        (misses, row["id"]))
+
+        # Record this run's depth regardless — even for skipped sources, since
+        # the *next* run compares against this one.
+        if pages_by_source:
+            self.record_coverage(pages_by_source)
+        else:
+            self._conn.commit()
+
+        return {"missed": missed, "gone": gone,
+                "skipped_sources": skipped_sources}
 
     # ── reading ─────────────────────────────────────────────────────────────
 

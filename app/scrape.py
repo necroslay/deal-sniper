@@ -121,6 +121,7 @@ def main(argv: list[str] | None = None) -> int:
 
     collected: list = []
     scraped: list[Platform] = []
+    pages_used: dict = {}
     for platform in platforms:
         pages = _pages_for(platform, args.pages)
         print(f"Scraping {platform.value} ({pages} page(s))...")
@@ -133,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
         if found:
             scraped.append(platform)
             collected.extend(found)
+            pages_used[platform.value] = pages
 
     if not collected:
         print("\nNothing scraped — the database was left unchanged.")
@@ -143,8 +145,11 @@ def main(argv: list[str] | None = None) -> int:
     seen_keys, new, skipped, products = store_listings(store, listings)
 
     # Retire listings that stopped appearing. Restricted to the sources we
-    # actually read, so a source that returned nothing cannot retire inventory.
-    cycle = store.close_observation_cycle(seen_keys=seen_keys, sources=scraped)
+    # actually read, so a source that returned nothing cannot retire inventory —
+    # and skipped entirely for a source swept less deeply than last time, since a
+    # shallow sweep is not evidence that anything is gone.
+    cycle = store.close_observation_cycle(
+        seen_keys=seen_keys, sources=scraped, pages_by_source=pages_used)
 
     counts = store.counts()
     print(f"\nScraped {len(collected)} listing(s), {len(listings)} unique "
@@ -154,6 +159,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"  !! {skipped} listing(s) skipped — no source id, so they "
               f"cannot be identified. Check that scraper's id parsing.")
     print(f"  lifecycle: {cycle['missed']} missed, {cycle['gone']} newly gone")
+    if cycle["skipped_sources"]:
+        print(f"  !! retirement skipped for {', '.join(cycle['skipped_sources'])}: "
+              f"fewer pages than the previous run, so unseen listings were not "
+              f"counted as gone.")
     print(f"  database: {counts['total']} total, {counts['active']} active, "
           f"{counts['gone']} gone  ({counts['by_source']})")
 
