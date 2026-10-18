@@ -41,3 +41,6 @@ tests/output/
 *.swo
 .DS_Store
 Thumbs.db
+
+# Runtime logs
+logs/

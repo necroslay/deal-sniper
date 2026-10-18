@@ -87,10 +87,34 @@ class MLConfig:
 
 
 @dataclass
+class AlertConfig:
+    """When a listing is worth a notification, and how many to send.
+
+    "Deal" always means *underpriced relative to comparable asking prices* for the
+    same product (see ``app.ml.price_model``) — never a claim about market value.
+    The webhook URL is a secret and is read from the environment, not stored here.
+    """
+    webhook_env: str = "DISCORD_WEBHOOK_URL"
+    # A product needs this many comparable listings before its band is trusted.
+    min_comps: int = 8
+    # Alert only when the price is at or below the product's P25 *and* at least
+    # this far under its median — P25 alone would flag a quarter of all listings.
+    min_discount: float = 0.20
+    # Prices under this fraction of the median are almost always scams, parts-only
+    # ads or placeholders, not bargains.
+    min_price_ratio: float = 0.35
+    # Only listings first seen this recently are alerted, so the first run on a
+    # large backlog cannot flood the channel.
+    max_listing_age_hours: float = 72.0
+    max_per_run: int = 10
+
+
+@dataclass
 class AppConfig:
     """Top-level config aggregating all sub-configs."""
     scraper: ScraperConfig = field(default_factory=ScraperConfig)
     lifecycle: LifecycleConfig = field(default_factory=LifecycleConfig)
+    alerts: AlertConfig = field(default_factory=AlertConfig)
     ml: MLConfig = field(default_factory=MLConfig)
     currency: str = "CAD"
 

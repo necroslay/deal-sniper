@@ -38,7 +38,19 @@ SQL = """CREATE TABLE IF NOT EXISTS raw_listings (
 CREATE TABLE IF NOT EXISTS scrape_coverage (
     source TEXT PRIMARY KEY,
     pages INTEGER NOT NULL,
-    observed_at TEXT NOT NULL);"""
+    observed_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scrape_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL, finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    sources TEXT NOT NULL DEFAULT '', collected INTEGER NOT NULL DEFAULT 0,
+    unique_listings INTEGER NOT NULL DEFAULT 0, new_listings INTEGER NOT NULL DEFAULT 0,
+    newly_gone INTEGER NOT NULL DEFAULT 0, alerts_sent INTEGER NOT NULL DEFAULT 0,
+    errors TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS alerts_sent (
+    listing_id TEXT PRIMARY KEY,
+    alerted_at TEXT NOT NULL,
+    price_cad REAL NOT NULL);"""
 
 
 class Store:
@@ -293,6 +305,55 @@ class Store:
 
         return {"missed": missed, "gone": gone,
                 "skipped_sources": skipped_sources}
+
+    # ── run history ─────────────────────────────────────────────────────────
+
+    def start_run(self, sources: list[str]) -> int:
+        """Open a ``scrape_runs`` row and return its id."""
+        self._check()
+        cur = self._cur.execute(
+            "INSERT INTO scrape_runs (started_at, sources) VALUES (?, ?)",
+            (datetime.now(timezone.utc).isoformat(), ",".join(sources)))
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def finish_run(self, run_id: int, status: str, collected: int = 0,
+                   unique_listings: int = 0, new_listings: int = 0,
+                   newly_gone: int = 0, alerts_sent: int = 0,
+                   errors: Optional[list[str]] = None) -> None:
+        """Close a run with its outcome. *status* is ok / partial / failed."""
+        self._check()
+        self._cur.execute(
+            "UPDATE scrape_runs SET finished_at = ?, status = ?, collected = ?, "
+            "unique_listings = ?, new_listings = ?, newly_gone = ?, "
+            "alerts_sent = ?, errors = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), status, collected,
+             unique_listings, new_listings, newly_gone, alerts_sent,
+             "\n".join(errors or []), run_id))
+        self._conn.commit()
+
+    def recent_runs(self, limit: int = 10):
+        """Most recent runs first."""
+        self._check()
+        return self._cur.execute(
+            "SELECT * FROM scrape_runs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+    # ── alert dedup ─────────────────────────────────────────────────────────
+
+    def alerted_ids(self) -> set:
+        """Listing ids that have already triggered a notification."""
+        self._check()
+        return {r["listing_id"] for r in
+                self._cur.execute("SELECT listing_id FROM alerts_sent")}
+
+    def mark_alerted(self, listing_id: str, price_cad: float) -> None:
+        self._check()
+        self._cur.execute(
+            "INSERT OR IGNORE INTO alerts_sent (listing_id, alerted_at, price_cad) "
+            "VALUES (?,?,?)",
+            (listing_id, datetime.now(timezone.utc).isoformat(), float(price_cad)))
+        self._conn.commit()
 
     # ── reading ─────────────────────────────────────────────────────────────
 

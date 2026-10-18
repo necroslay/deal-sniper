@@ -25,10 +25,43 @@ from collections import Counter
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 
 from app.adapters.sources import get_adapter
+from app.alerts import run_alerts, send_health_alert
 from app.config import CFG
 from app.db.store import Store
 from app.engines.enrich import resolve_and_assess
 from app.models.schema import Platform
+
+logger = logging.getLogger("scrape")
+
+LOG_DIR = pathlib.Path(__file__).resolve().parent.parent / "logs"
+
+
+def setup_logging() -> None:
+    """Log warnings to the console and everything to a rotating file.
+
+    The file is what you read when an unattended scheduled run misbehaves.
+    """
+    from logging.handlers import RotatingFileHandler
+
+    root = logging.getLogger()
+    if any(getattr(h, "_deal_sniper", False) for h in root.handlers):
+        return                                       # already configured
+    fmt = logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    root.setLevel(logging.INFO)
+    console = logging.StreamHandler()
+    console.setLevel(logging.WARNING)
+    handlers = [console]
+    try:
+        LOG_DIR.mkdir(exist_ok=True)
+        handlers.append(RotatingFileHandler(
+            LOG_DIR / "scrape.log", maxBytes=1_000_000, backupCount=5,
+            encoding="utf-8"))
+    except OSError:
+        pass                                         # read-only checkout: console only
+    for handler in handlers:
+        handler.setFormatter(fmt)
+        handler._deal_sniper = True
+        root.addHandler(handler)
 
 # Search terms per source. Kijiji's search is keyword-based, so several narrow
 # terms surface more distinct listings than one broad term; Craigslist's relevant
@@ -107,35 +140,51 @@ def main(argv: list[str] | None = None) -> int:
                         help="Pages per source (overrides config).")
     parser.add_argument("--db", default=None,
                         help="SQLite database path (defaults to app/listings.db).")
+    alert_group = parser.add_mutually_exclusive_group()
+    alert_group.add_argument("--no-alerts", action="store_true",
+                             help="Skip deal detection and notifications.")
+    alert_group.add_argument("--dry-run-alerts", action="store_true",
+                             help="Print the deals that would be sent; send nothing.")
     args = parser.parse_args(argv)
 
-    logging.basicConfig(level=logging.WARNING,
-                        format="%(asctime)s [%(levelname)s] %(message)s")
+    setup_logging()
 
     platforms = ([Platform.kijiji, Platform.craigslist]
                  if args.source == "all" else [Platform(args.source)])
 
     store = Store(**({"db": args.db} if args.db else {})).connect()
+    run_id = store.start_run([p.value for p in platforms])
 
     collected: list = []
     scraped: list[Platform] = []
     pages_used: dict = {}
+    errors: list[str] = []
     for platform in platforms:
         pages = _pages_for(platform, args.pages)
         print(f"Scraping {platform.value} ({pages} page(s))...")
         try:
             found = scrape_source(platform, pages)
         except Exception as exc:  # a dead source must not kill the run
-            print(f"  !! {platform.value} failed: {type(exc).__name__}: {exc}")
+            msg = f"{platform.value} failed: {type(exc).__name__}: {exc}"
+            print(f"  !! {msg}")
+            logger.exception("scrape failed for %s", platform.value)
+            errors.append(msg)
             continue
         print(f"  {platform.value}: {len(found)} listing(s)")
         if found:
             scraped.append(platform)
             collected.extend(found)
             pages_used[platform.value] = pages
+        else:
+            # A source that returns nothing is far more often a broken scraper
+            # (markup or API change, block) than an empty marketplace.
+            errors.append(f"{platform.value} returned 0 listings")
 
     if not collected:
         print("\nNothing scraped — the database was left unchanged.")
+        store.finish_run(run_id, "failed", errors=errors)
+        if not args.no_alerts and not args.dry_run_alerts:
+            send_health_alert("Scrape run found nothing.\n" + "\n".join(errors))
         store.close()
         return 1
 
@@ -167,6 +216,26 @@ def main(argv: list[str] | None = None) -> int:
     print("\nTop products:")
     for name, n in products.most_common(10):
         print(f"  {name[:38]:<40s} {n:>3}")
+
+    alerts_sent = 0
+    if not args.no_alerts:
+        try:
+            outcome = run_alerts(store, dry_run=args.dry_run_alerts)
+        except Exception as exc:  # alerting must never lose a finished scrape
+            logger.exception("deal detection failed")
+            errors.append(f"alerts failed: {type(exc).__name__}: {exc}")
+        else:
+            alerts_sent = outcome["sent"]
+            note = "" if outcome["configured"] else " (no webhook configured)"
+            print(f"\nDeals: {outcome['found']} found, {alerts_sent} sent{note}")
+
+    status = "partial" if errors else "ok"
+    store.finish_run(run_id, status, collected=len(collected),
+                     unique_listings=len(listings), new_listings=new,
+                     newly_gone=cycle["gone"], alerts_sent=alerts_sent,
+                     errors=errors)
+    if errors and not args.no_alerts and not args.dry_run_alerts:
+        send_health_alert("Scrape finished with problems:\n" + "\n".join(errors))
 
     store.close()
     print("\nNow run:  streamlit run app/dashboard.py")

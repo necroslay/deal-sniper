@@ -92,6 +92,36 @@ hundreds of rows into one with no error.
 > falsely retiring everything the deeper run had found. Depth is compared with the
 > **previous** run, so normal retirement resumes on the next equal-or-deeper run.
 
+## Scheduled scraping and deal alerts
+
+`python -m app.scrape` scrapes, then looks for **new listings priced well under
+comparable asking prices** and posts them to a Discord channel.
+
+```bash
+# 1. Create a Discord webhook, then put its URL in .env (gitignored)
+copy .env.example .env          # set DISCORD_WEBHOOK_URL=...
+
+# 2. Preview what would be sent, without sending or marking anything alerted
+python -m app.scrape --dry-run-alerts
+
+# 3. Run it daily on Windows (Task Scheduler; runs at next boot if the PC was off)
+powershell -ExecutionPolicy Bypass -File scripts\register_daily_scrape.ps1 -Time 08:00
+```
+
+- **What counts as a deal** (`CFG.alerts`): the product has at least 8 comparable
+  listings, the price is at or below their P25 *and* at least 20% under their
+  median, and not under 35% of it (that is a scam or placeholder, not a bargain).
+  Titles mentioning parts/repair/broken, laptops, desktops or bundles are skipped.
+  It is a statement about asking prices of comparable listings, not market value.
+- **Each listing alerts once**, and only after Discord accepted the message, so an
+  outage retries on the next run. At most 10 per run, and only listings first
+  seen in the last 72 hours, so a big backlog cannot flood the channel.
+- **Health alerts:** if a source returns nothing or fails, the same channel gets a
+  "Scrape problem" message — a silently dead scraper is the usual failure here.
+- **History:** every run is recorded in the `scrape_runs` table (counts, status,
+  errors) and logged to `logs/scrape.log`.
+- `--no-alerts` skips all of it. With no webhook configured, nothing is sent.
+
 ## The dashboard
 
 - **Header:** total listings, active, new in 24h, median price, gone (likely sold)
