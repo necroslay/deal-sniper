@@ -155,16 +155,20 @@ python -m app.web            # opens http://127.0.0.1:8765
 ```
 
 A custom, local-only interface (no framework, no build step, nothing to install
-beyond the project requirements). Every scored listing is a blip on a radar:
+beyond the project requirements), drawn in the same gothic ink-on-parchment style
+as Nelson's board: engraved hatching, pointed arches, double "tracery" borders,
+a cathedral masthead, and a light/dark theme that follows your system. Every
+scored listing is a small ink drawing in a **rose window**:
 
-- **Distance from centre = sniper score** (the middle is the best deal),
-  **direction = product family** (RTX 50 / 40 / 30, Radeon, gaming laptops,
-  MacBooks, ...), **colour = risk**, **size = landed cost**.
-- A ringed blip clears the alert bar; a pulsing one was first seen in the last
-  24h. A sweep line passes over the scope and blips fade like phosphor.
-- **Click a blip to lock on.** The dossier shows landed cost, a *price lens*
-  placing the listing among comparable asking prices, the resale maths, the
-  risk breakdown, price history, and who is selling.
+- **Distance from the centre = score** (the middle is the best deal),
+  **petal = product family** (RTX 50 / 40 / 30, Radeon, gaming laptops,
+  MacBooks, ...), **engraving = risk** (open circle is safe, hatched is medium,
+  red cross-hatching is high), **size = landed cost**.
+- A double ring clears the alert bar; a rippling one was first seen in the last
+  24h. Click a petal's name to filter to it.
+- **Click a listing to circle it in ink.** The dossier, framed by a Tudor arch,
+  shows landed cost, a *price lens* placing the listing among comparable asking
+  prices, the resale maths, the risk breakdown, price history, and the seller.
 - **Triage** with Save / Contacted / Dismiss (remembered in the database), and
   **copy a ready-to-send "can you ship it?" message** (add your postal code on
   the left to fill it in).
