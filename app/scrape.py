@@ -30,6 +30,7 @@ from app.config import CFG
 from app.db.store import Store
 from app.engines.enrich import resolve_and_assess
 from app.models.schema import Platform
+from app.watchlist import apply_watchlist
 
 logger = logging.getLogger("scrape")
 
@@ -148,6 +149,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     setup_logging()
+    for problem in apply_watchlist():
+        print(f"  !! watchlist.yaml: {problem}")
 
     platforms = ([Platform.kijiji, Platform.craigslist]
                  if args.source == "all" else [Platform(args.source)])

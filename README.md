@@ -108,18 +108,44 @@ python -m app.scrape --dry-run-alerts
 powershell -ExecutionPolicy Bypass -File scripts\register_daily_scrape.ps1 -Time 08:00
 ```
 
+- **Built for buying by mail.** Every deal is judged on **landed cost** (price +
+  shipping), not the sticker price. Kijiji's own `fulfillment` field says whether
+  the seller ships (only ~16% of ads state it); text like "pickup only" overrides
+  it, and explicit pickup-only listings never alert. Ads that don't say are
+  alerted as **"ask if they ship"** with extra risk. Shipping is an estimate from
+  `CFG.logistics` unless the seller states a price.
 - **What counts as a deal** (`CFG.alerts`): the product has at least 8 comparable
-  listings, the price is at or below their P25 *and* at least 20% under their
-  median, and not under 35% of it (that is a scam or placeholder, not a bargain).
-  Titles mentioning parts/repair/broken, laptops, desktops or bundles are skipped.
-  It is a statement about asking prices of comparable listings, not market value.
+  listings, and either
+  - **keep route:** landed cost is at or below their P25 *and* at least 20% under
+    the median (30% for laptops, whose comparables are looser), or
+  - **flip route:** expected resale (median x 0.92) minus marketplace fees,
+    outbound shipping, landed cost and a risk reserve clears $40 profit and 15% ROI.
+
+  Under 35% of the median is treated as a scam/placeholder, not a bargain. Titles
+  mentioning parts/repair/broken/locked, bundles or desktops are skipped. This is
+  a statement about *asking* prices of comparable listings, not market value.
+- **Risk score (0-100):** shipped sight-unseen, scam-shaped price, no/one photo,
+  short description, untraceable-payment wording, cash-only seller, a prolific
+  seller, shipping not stated. Anything at 55+ ("high") is dropped; the reasons
+  are printed in each alert so you know what to ask.
+- **Laptops and GPUs.** Laptops are keyed by what sets their price: a dedicated
+  GPU (`Laptop RTX 4060`), Apple model + chip (`MacBook Pro M2 Pro`), or family +
+  CPU class + RAM bucket (`Lenovo ThinkPad i7 16GB`). Titles that can't be placed
+  are left unresolved rather than guessed.
+- **One alert per item.** The same seller posting the same product at the same
+  price (cross-posts, relists) alerts once, keeping the cheapest.
+- **Tune without code:** copy `watchlist.example.yaml` to `watchlist.yaml`
+  (gitignored) to set product include/exclude lists, a budget ceiling, margins,
+  risk tolerance, resale fees and your real shipping rates. Typos are reported.
 - **Each listing alerts once**, and only after Discord accepted the message, so an
   outage retries on the next run. At most 10 per run, and only listings first
   seen in the last 72 hours, so a big backlog cannot flood the channel.
 - **Health alerts:** if a source returns nothing or fails, the same channel gets a
   "Scrape problem" message — a silently dead scraper is the usual failure here.
 - **History:** every run is recorded in the `scrape_runs` table (counts, status,
-  errors) and logged to `logs/scrape.log`.
+  errors) and logged to `logs/scrape.log`. Each listing's price changes are kept in
+  `price_history`, so price cuts are visible over time; Kijiji's own "price
+  dropped" flag is shown in the alert.
 - `--no-alerts` skips all of it. With no webhook configured, nothing is sent.
 
 ## The dashboard

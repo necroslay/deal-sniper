@@ -372,6 +372,9 @@ class KijijiScraper:
                 "        description"
                 "        activationDate"
                 "        imageUrls"
+                "        attributes { all { canonicalName canonicalValues } }"
+                "        flags { priceDrop }"
+                "        posterInfo { posterId sellerType }"
                 "      }"
                 "    }"
                 "  }"
@@ -451,6 +454,10 @@ class KijijiScraper:
         if not isinstance(image_urls, list):
             image_urls = []
 
+        attrs = self._attribute_map(data)
+        flags = data.get("flags") if isinstance(data.get("flags"), dict) else {}
+        poster = data.get("posterInfo") if isinstance(data.get("posterInfo"), dict) else {}
+
         return KijijiListing(
             title=title,
             price_cad=price_cad,
@@ -460,7 +467,25 @@ class KijijiScraper:
             date_posted=date_posted,
             listing_id=listing_id,
             image_urls=image_urls,
+            fulfillment=",".join(attrs.get("fulfillment", [])),
+            condition=",".join(attrs.get("condition", [])),
+            payment=",".join(attrs.get("payment", [])),
+            seller_id=str(poster.get("posterId") or ""),
+            seller_type=str(poster.get("sellerType") or ""),
+            price_drop=bool(flags.get("priceDrop")),
         )
+
+    @staticmethod
+    def _attribute_map(data: dict) -> dict[str, list[str]]:
+        """``{canonicalName: [values]}`` from a listing's ``attributes.all``."""
+        block = data.get("attributes")
+        items = block.get("all") if isinstance(block, dict) else None
+        out: dict[str, list[str]] = {}
+        for item in items or []:
+            if isinstance(item, dict) and item.get("canonicalName"):
+                values = item.get("canonicalValues") or []
+                out[item["canonicalName"]] = [str(v) for v in values]
+        return out
 
     def scrape_search_page_graphql(self, search_term: str, page: int) -> list[KijijiListing]:
         """Alias for _fetch_page_graphql called by scrape()."""

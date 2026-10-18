@@ -104,6 +104,12 @@ class KijijiAdapter(SourceAdapter):
                 title=l.title, price_cad=l.price_cad, url=l.url,
                 location=l.location, description=l.description,
                 date_posted=l.date_posted, image_urls=l.image_urls,
+                fulfillment=getattr(l, "fulfillment", ""),
+                condition=getattr(l, "condition", ""),
+                payment=getattr(l, "payment", ""),
+                seller_id=getattr(l, "seller_id", ""),
+                seller_type=getattr(l, "seller_type", ""),
+                price_drop=getattr(l, "price_drop", False),
                 scraped_at=l.scraped_at) for l in listings]
         except Exception as e:
             logger.error(f"Kijiji error: {e}"); return []
@@ -139,6 +145,7 @@ class CraigslistAdapter(SourceAdapter):
                 title=l.title, price_cad=l.price_cad, url=l.url,
                 location=l.location, description=l.description,
                 date_posted=l.date_posted, image_urls=l.image_urls,
+                fulfillment="pickup",       # Craigslist is local, in-person only
                 scraped_at=l.scraped_at) for l in listings]
         except Exception as e:
             logger.error(f"CL error: {e}"); return []

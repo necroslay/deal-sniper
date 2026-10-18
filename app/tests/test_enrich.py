@@ -14,7 +14,6 @@ TITLES = [
     "RTX 4090 water block cooler",
     "RTX 3060 Ti, RTX 3070, RTX3080 for sale",
     "Wooden desk",
-    "Alienware Laptop Ryzen 7 5800H 16GB RTX 3060",
     "PS5 Disc Version - Like New",
 ]
 
@@ -56,6 +55,13 @@ class TestRulesOnly:
         assert product.standard_name == expected.standard_name
         assert product.category == expected.category
         assert flag == assess_listing(title, expected)
+
+    def test_gaming_laptop_is_a_laptop_not_a_stray_gpu(self):
+        """A GPU named inside a laptop title prices against laptops, unflagged."""
+        title = "Alienware Laptop Ryzen 7 5800H 16GB RTX 3060"
+        product, flag = resolve_and_assess(title)
+        assert (product.standard_name, product.category) == ("Laptop RTX 3060", "laptop")
+        assert flag is None
 
     def test_accessory_is_flagged(self):
         _, flag = resolve_and_assess("RTX 4090 water block cooler")

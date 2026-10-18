@@ -31,6 +31,15 @@ class RawListing(BaseModel):
     description: Optional[str] = ""
     date_posted: Optional[str] = None
     image_urls: list[str] = Field(default_factory=list)
+    # How the item can change hands, and who is selling it. Empty = unknown.
+    # ``fulfillment`` is a comma-joined subset of shipping / delivery / curbside /
+    # pickup; Craigslist is pickup-only, Kijiji reports it per listing.
+    fulfillment: str = ""
+    condition: str = ""
+    payment: str = ""
+    seller_id: str = ""
+    seller_type: str = ""
+    price_drop: bool = False
     raw_payload: Optional[dict[str, Any]] = None
     scraped_at: str = Field(default_factory=lambda: datetime.now().isoformat())
 

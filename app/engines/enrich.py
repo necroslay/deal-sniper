@@ -19,6 +19,7 @@ import logging
 from typing import Optional
 
 from app.config import CFG
+from app.engines.laptops import resolve_laptop
 from app.engines.listing_guard import assess_listing
 from app.engines.resolver import resolve_product
 from app.models.schema import CanonicalProduct
@@ -121,6 +122,11 @@ def resolve_and_assess(title: str, product: Optional[CanonicalProduct] = None
 
     if product is None:
         product = resolve_product(title)
+        # A laptop that merely *contains* a GPU ("ROG Strix RTX 3060 laptop")
+        # is a laptop, not a GPU: price it against other laptops.
+        laptop = resolve_laptop(title)
+        if laptop is not None:
+            product = laptop
 
     # A model is only worth asking when the rules gave up.
     if product.category == "unknown":

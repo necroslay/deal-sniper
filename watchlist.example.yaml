@@ -1,0 +1,26 @@
+# Copy to watchlist.yaml (gitignored) to tune alerts without touching code.
+# Everything is optional; omitted keys keep the defaults in app/config.py.
+
+alerts:
+  # Only alert on products whose name contains one of these (case-insensitive).
+  # Empty = everything. Product keys look like "RTX 4090", "Laptop RTX 4060",
+  # "MacBook Pro M2 Pro", "Lenovo ThinkPad i7 16GB".
+  include: []
+  exclude: []
+  max_landed_cad: 0          # price + shipping you'd pay; 0 = no ceiling
+  min_discount: 0.20         # landed cost this far under the median (GPUs)
+  laptop_min_discount: 0.30  # laptops need a bigger margin (noisier comparables)
+  max_risk: 55               # 0 safe .. 100 scam-shaped; 55+ is "high"
+  max_per_run: 10
+  require_shippable: true    # false = also show pickup-only listings
+  unknown_counts_as_shippable: true   # "ask the seller" alerts
+
+profit:                      # resale maths, if you flip
+  ask_to_sold: 0.92          # sold price as a share of the median ask
+  resale_fee_rate: 0.135     # marketplace + payment fees
+  risk_reserve_rate: 0.04    # DOA / returns / scams, as a share of price
+
+logistics:
+  shipping_cad:              # your real shipping rates per item class
+    gpu: 28
+    laptop: 40

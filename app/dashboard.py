@@ -22,6 +22,8 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 
 from app.db.store import DB, Store
+from app.engines import logistics
+from app.engines.laptops import parse_laptop
 
 # Allow pointing the viewer at a different database (handy for tests, or for
 # keeping several scraped datasets side by side).
@@ -47,6 +49,16 @@ def load_listings(db_path: str) -> pd.DataFrame:
     df["price_cad"] = pd.to_numeric(df["price_cad"], errors="coerce")
     df["flagged"] = df["flag_reason"].fillna("").astype(str).str.len() > 0
     df["product_key"] = df["product_key"].fillna("unresolved")
+
+    # Can it be mailed, and what does it cost to land? (estimates; see
+    # engines/logistics.py and CFG.logistics)
+    def _logistics(row):
+        category = "laptop" if parse_laptop(row["title"]) else "gpu"
+        info = logistics.assess(row.to_dict(), category)
+        return pd.Series({"shipping": info.status,
+                          "landed": row["price_cad"] + info.shipping_cad})
+
+    df[["shipping", "landed"]] = df.apply(_logistics, axis=1)
     return df
 
 
@@ -148,6 +160,7 @@ posted_within = st.sidebar.selectbox(
     "Posted within", ["Any time", "24 hours", "3 days", "7 days", "30 days"])
 
 hide_flagged = st.sidebar.checkbox("Hide accessories / lots", value=True)
+hide_pickup = st.sidebar.checkbox("Hide pickup-only listings", value=True)
 include_gone = st.sidebar.checkbox("Include gone listings", value=True)
 
 st.sidebar.divider()
@@ -170,6 +183,8 @@ if posted_days:
     view = view[view["date_posted"] >= now - pd.Timedelta(days=posted_days)]
 if hide_flagged:
     view = view[~view["flagged"]]
+if hide_pickup:
+    view = view[view["shipping"] != "pickup_only"]
 if not include_gone:
     view = view[view["status"] == "active"]
 
@@ -204,14 +219,17 @@ if not new_by_day.empty:
 st.subheader(f"Listings ({len(view):,} of {len(df):,})")
 
 table = view[[
-    "product_key", "title", "price_cad", "source", "location",
-    "date_posted", "first_seen_at", "status", "flag_reason", "url",
+    "product_key", "title", "price_cad", "landed", "shipping", "condition",
+    "price_drop", "source", "location", "date_posted", "first_seen_at",
+    "status", "flag_reason", "url",
 ]].rename(columns={
     "product_key": "Product", "title": "Title", "price_cad": "Price",
-    "source": "Source", "location": "Location", "date_posted": "Posted",
-    "first_seen_at": "First seen", "status": "Status",
+    "landed": "Landed (est.)", "shipping": "Shipping", "condition": "Condition",
+    "price_drop": "Price drop", "source": "Source", "location": "Location",
+    "date_posted": "Posted", "first_seen_at": "First seen", "status": "Status",
     "flag_reason": "Flagged", "url": "Link",
 })
+table["Price drop"] = table["Price drop"].astype(bool)
 
 st.dataframe(
     table,
@@ -220,6 +238,7 @@ st.dataframe(
     height=520,
     column_config={
         "Price": st.column_config.NumberColumn(format="$%.0f"),
+        "Landed (est.)": st.column_config.NumberColumn(format="$%.0f"),
         "Link": st.column_config.LinkColumn(display_text="open"),
         "Posted": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),
         "First seen": st.column_config.DatetimeColumn(format="YYYY-MM-DD"),

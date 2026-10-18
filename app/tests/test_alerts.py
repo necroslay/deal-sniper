@@ -18,7 +18,8 @@ def market(make_stored_row):
     def row(lid, price, seen_hours_ago=1.0, status="active"):
         r = make_stored_row(lid, "Nvidia RTX 3080", price)
         r.update(status=status, url=f"https://example.com/{lid}",
-                 location="Toronto",
+                 location="Toronto", fulfillment="shipping",
+                 image_urls='["a","b","c"]',
                  first_seen_at=(now - timedelta(hours=seen_hours_ago)).isoformat())
         return r
 
@@ -78,6 +79,7 @@ def test_thin_product_has_no_trusted_band(market):
 def test_max_per_run_caps_results(market):
     comps, row = market
     CFG.alerts.max_per_run = 2
+    comps = comps + [row(f"m{i}", 700 + i * 3, seen_hours_ago=500) for i in range(60)]
     cheap = [row(f"x{i}", 500 + i) for i in range(5)]
     assert len(alerts.find_deals(comps + cheap, set())) == 2
 
@@ -94,10 +96,18 @@ def test_payloads_chunk_to_discord_embed_limit(market):
 
 
 def test_run_alerts_marks_only_successful_sends(store, make_listing, monkeypatch):
+    def shippable(listing):
+        # Photos and a real description, or the risk score rightly drops it.
+        listing.fulfillment = "shipping"
+        listing.image_urls = ["a.jpg", "b.jpg", "c.jpg"]
+        listing.description = "Used graphics card, works perfectly, original box."
+        return listing
+
     for i in range(10):
-        store.observe_listing(make_listing(f"c{i}", price=700 + i * 10),
+        store.observe_listing(shippable(make_listing(f"c{i}", price=700 + i * 10)),
                               product_key="RTX 3080")
-    store.observe_listing(make_listing("cheap", price=520), product_key="RTX 3080")
+    store.observe_listing(shippable(make_listing("cheap", price=520)),
+                          product_key="RTX 3080")
     monkeypatch.setenv(CFG.alerts.webhook_env, "https://discord.test/hook")
     monkeypatch.setattr(alerts, "load_env_file", lambda *a, **k: None)
 

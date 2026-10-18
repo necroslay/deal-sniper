@@ -35,6 +35,10 @@ SQL = """CREATE TABLE IF NOT EXISTS raw_listings (
     miss_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active', gone_at TEXT,
     UNIQUE(source, source_listing_id));
+CREATE TABLE IF NOT EXISTS price_history (
+    listing_id TEXT NOT NULL,
+    price_cad REAL NOT NULL,
+    seen_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scrape_coverage (
     source TEXT PRIMARY KEY,
     pages INTEGER NOT NULL,
@@ -88,6 +92,12 @@ class Store:
             ("miss_count", "INTEGER NOT NULL DEFAULT 0"),
             ("status", "TEXT NOT NULL DEFAULT 'active'"),
             ("gone_at", "TEXT"),
+            ("fulfillment", "TEXT NOT NULL DEFAULT ''"),
+            ("condition", "TEXT NOT NULL DEFAULT ''"),
+            ("payment", "TEXT NOT NULL DEFAULT ''"),
+            ("seller_id", "TEXT NOT NULL DEFAULT ''"),
+            ("seller_type", "TEXT NOT NULL DEFAULT ''"),
+            ("price_drop", "INTEGER NOT NULL DEFAULT 0"),
         ):
             if name not in existing:
                 self._cur.execute(
@@ -100,6 +110,13 @@ class Store:
         self._cur.execute(
             "UPDATE raw_listings SET last_seen_at = scraped_at "
             "WHERE last_seen_at IS NULL")
+        # Seed price history for rows stored before it existed, so a later price
+        # change has an earlier point to compare against.
+        self._cur.execute(
+            "INSERT INTO price_history (listing_id, price_cad, seen_at) "
+            "SELECT id, price_cad, COALESCE(first_seen_at, scraped_at) "
+            "FROM raw_listings WHERE id NOT IN "
+            "(SELECT DISTINCT listing_id FROM price_history)")
         # Indexes are created here, not in SQL above: on a legacy database the
         # columns they reference do not exist until this migration has run.
         self._cur.execute(
@@ -108,6 +125,9 @@ class Store:
         self._cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_listings_product "
             "ON raw_listings(product_key)")
+        self._cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_price_history_listing "
+            "ON price_history(listing_id)")
         self._conn.commit()
 
     def close(self) -> None:
@@ -159,32 +179,59 @@ class Store:
 
         now = observed_at or datetime.now(timezone.utc).isoformat()
         row = self._cur.execute(
-            "SELECT id FROM raw_listings WHERE source = ? AND source_listing_id = ?",
+            "SELECT id, price_cad FROM raw_listings "
+            "WHERE source = ? AND source_listing_id = ?",
             (listing.source.value, listing.source_listing_id)).fetchone()
 
+        extras = (getattr(listing, "fulfillment", "") or "",
+                  getattr(listing, "condition", "") or "",
+                  getattr(listing, "payment", "") or "",
+                  getattr(listing, "seller_id", "") or "",
+                  getattr(listing, "seller_type", "") or "",
+                  int(bool(getattr(listing, "price_drop", False))))
+
         if row is None:
+            listing_pk = str(uuid.uuid4())
             self._cur.execute(
                 "INSERT INTO raw_listings "
                 "(id, source, source_listing_id, title, price_cad, url, location, "
                 "description, date_posted, image_urls, scraped_at, product_key, "
-                "flag_reason, first_seen_at, last_seen_at, miss_count, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active')",
-                (str(uuid.uuid4()), listing.source.value,
+                "flag_reason, first_seen_at, last_seen_at, miss_count, status, "
+                "fulfillment, condition, payment, seller_id, seller_type, price_drop) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active',?,?,?,?,?,?)",
+                (listing_pk, listing.source.value,
                  listing.source_listing_id, listing.title, listing.price_cad,
                  listing.url, listing.location or "", listing.description or "",
                  listing.date_posted, json.dumps(listing.image_urls),
-                 listing.scraped_at, product_key, flag_reason, now, now))
+                 listing.scraped_at, product_key, flag_reason, now, now) + extras)
+            self._cur.execute(
+                "INSERT INTO price_history (listing_id, price_cad, seen_at) "
+                "VALUES (?,?,?)", (listing_pk, listing.price_cad, now))
             self._conn.commit()
             return True
 
         self._cur.execute(
             "UPDATE raw_listings SET last_seen_at = ?, miss_count = 0, "
             "status = 'active', gone_at = NULL, title = ?, price_cad = ?, "
-            "description = ?, product_key = ?, flag_reason = ? WHERE id = ?",
+            "description = ?, product_key = ?, flag_reason = ?, "
+            "fulfillment = ?, condition = ?, payment = ?, seller_id = ?, "
+            "seller_type = ?, price_drop = ? WHERE id = ?",
             (now, listing.title, listing.price_cad, listing.description or "",
-             product_key, flag_reason, row["id"]))
+             product_key, flag_reason) + extras + (row["id"],))
+        # Only a changed price is history; an unchanged one is just a re-sighting.
+        if row["price_cad"] != listing.price_cad:
+            self._cur.execute(
+                "INSERT INTO price_history (listing_id, price_cad, seen_at) "
+                "VALUES (?,?,?)", (row["id"], listing.price_cad, now))
         self._conn.commit()
         return False
+
+    def price_history(self, listing_id: str) -> list:
+        """Every recorded price for one listing, oldest first."""
+        self._check()
+        return self._cur.execute(
+            "SELECT price_cad, seen_at FROM price_history WHERE listing_id = ? "
+            "ORDER BY seen_at", (listing_id,)).fetchall()
 
     def update_enrichment(self, listing_id: str, product_key: Optional[str],
                           flag_reason: Optional[str]) -> None:
