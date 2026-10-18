@@ -27,8 +27,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent))
 from app.adapters.sources import get_adapter
 from app.config import CFG
 from app.db.store import Store
-from app.engines.listing_guard import assess_listing
-from app.engines.resolver import resolve_product
+from app.engines.enrich import resolve_and_assess
 from app.models.schema import Platform
 
 # Search terms per source. Kijiji's search is keyword-based, so several narrow
@@ -89,8 +88,7 @@ def store_listings(store: Store, listings: list) -> tuple[set, int, int, Counter
         if not (listing.source_listing_id or "").strip():
             skipped += 1
             continue
-        product = resolve_product(listing.title)
-        flag = assess_listing(listing.title, product)
+        product, flag = resolve_and_assess(listing.title)
         if store.observe_listing(listing, product_key=product.standard_name,
                                  flag_reason=flag):
             new += 1

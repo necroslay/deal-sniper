@@ -209,7 +209,7 @@ class KijijiScraper:
 
     def scrape_search_page(self, search_term: str, page: int = 1) -> list[KijijiListing]:
         """Scrape a single search results page for a given search term."""
-        url = CFG.search.url_template.format(search_term=search_term, page=page)
+        url = CFG.search.search_url(search_term, page)
         logger.info(f"Fetching page {page}: {url}")
 
         html = self.fetch_page(url)
@@ -343,12 +343,10 @@ class KijijiScraper:
         /page-N/ in the URL path. The PaginationInputV2 offset parameter
         is ignored by the API — pagination is controlled entirely by the URL.
         """
-        if page == 1:
-            url_path = f"/b-gta-greater-toronto-area/{search_term}/k0l1700272"
-        else:
-            url_path = f"/b-gta-greater-toronto-area/{search_term}/page-{page}/k0l1700272"
-
-        full_url = f"https://www.kijiji.ca{url_path}"
+        # Region and location come from config (SearchConfig.search_url), so the
+        # geographic scope is a config edit. This used to be hardcoded to the
+        # GTA, which silently ignored the configured scope entirely.
+        full_url = CFG.search.search_url(search_term, page)
 
         query = {
             "operationName": "SearchResultsPage",
@@ -383,7 +381,7 @@ class KijijiScraper:
 
         try:
             resp = self.scraper.post(
-                "https://www.kijiji.ca/anvil/api",
+                f"{CFG.search.base_url}/anvil/api",
                 json=query,
                 timeout=30,
                 headers=self._get_kijiji_headers(),

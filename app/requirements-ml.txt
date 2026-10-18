@@ -1,0 +1,21 @@
+# =============================================================================
+# Deal Sniper — optional machine-learning layer
+#
+# Install with:  pip install -r requirements-ml.txt
+#
+# The scraper + viewer run without any of this. The ML layer is opt-in and
+# gated behind `CFG.ml.enabled` (off by default), so the base install stays
+# small. Only the evaluation harness, dataset builder and models need these.
+# =============================================================================
+
+# Dataset assembly, metrics, TF-IDF + linear models.
+scikit-learn>=1.3
+numpy>=1.24
+pandas>=2.0
+
+# Quantile price model (app/ml/price_model.py). The price harness degrades to the
+# per-product quantile baseline when this is absent.
+lightgbm>=4.0
+
+# Training entry point (app/ml/train.py)
+pytest>=8.0

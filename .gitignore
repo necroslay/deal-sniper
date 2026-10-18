@@ -14,6 +14,14 @@ env/
 *.db
 *.sqlite
 
+# ── ML artifacts (serialized models + local-only labels) ─────────────────────
+# Committed labels live in data/labels/*.csv; *.local.csv is a scratch labeling
+# file. Model binaries are rebuilt by `python -m app.ml.train`.
+models/
+*.joblib
+*.pkl
+data/labels/*.local.csv
+
 # ── Config / secrets ────────────────────────────────────────────────────────
 *.env
 *.env.local

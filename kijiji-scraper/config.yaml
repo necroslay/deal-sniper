@@ -8,10 +8,18 @@
 search:
   # Base domain — change if Kijiji moves region/country
   base_url: "https://www.kijiji.ca"
-  # URL template: {search_term} and {page} are filled at runtime.
-  # k0         = no category filter
-  # l1700272   = Toronto (GTA) location ID
-  url_template: "https://www.kijiji.ca/b-gta-greater-toronto-area/{search_term}/k0l1700272?page={page}"
+  # Geographic scope. The search URL is BUILT from these two fields, so the
+  # scope is a config edit, not a code edit:
+  #   region: "canada", location_id: "0"  -> all of Canada. `0` means every
+  #       location in the region: ~1,430 hits for "graphics-card" vs ~600 for
+  #       the GTA, and the titles are on-topic.
+  #   region: "gta-greater-toronto-area", location_id: "1700272"  -> GTA only.
+  #
+  # Do NOT blank location_id. Without the `l` segment ("k0") Kijiji serves an
+  # unscoped browse -- a GPU query returns cars and jewellery while still
+  # reporting thousands of hits. The code coerces empty to "0" for that reason.
+  region: "canada"
+  location_id: "0"
   # Default search term used when --search is not passed
   default_search_term: "graphics-card"
   # Terms swept by scrape_terms() / the deal-sniper pipeline's "ALL" mode.
@@ -31,8 +39,10 @@ search:
   # Max listings per page (Kijiji caps this server-side at 40)
   listings_per_page: 40
   # Target total listings to scrape per search term
-  # (pages = max_listings / listings_per_page)
-  max_listings: 400
+  # (pages = max_listings / listings_per_page). Raise this to harvest deeper:
+  # Canada-wide has thousands of hits per broad term, so pagination depth --
+  # not the location filter -- is what caps the corpus.
+  max_listings: 1200
 
 # ── GPU Model Filters ────────────────────────────────────────────────────────
 # Only listings whose title (lowercased) matches one of these are kept

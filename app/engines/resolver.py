@@ -84,12 +84,16 @@ PRODUCT_REGISTRY: list[dict] = [
     {"standard_name": "MacBook Pro M2", "aliases": ["MacBook Pro M2", "M2 MacBook Pro"]},
     {"standard_name": "MacBook Pro M3", "aliases": ["MacBook Pro M3", "M3 MacBook Pro"]},
     # iPhones
+    # No bare "15"/"14" alias: a two-digit number appears in unrelated titles
+    # ("Dell XPS 15", "iMac 2015", "ThinkCentre M715q") and would resolve them
+    # to an iPhone. Anything shorter than a four-digit model number is a
+    # size/year/code, not an identifier -- see the registry invariant test.
     {"standard_name": "iPhone 15 Pro Max", "aliases": ["iPhone 15 Pro Max", "15 Pro Max"]},
     {"standard_name": "iPhone 15 Pro", "aliases": ["iPhone 15 Pro", "15 Pro"]},
-    {"standard_name": "iPhone 15", "aliases": ["iPhone 15", "15"]},
+    {"standard_name": "iPhone 15", "aliases": ["iPhone 15"]},
     {"standard_name": "iPhone 14 Pro Max", "aliases": ["iPhone 14 Pro Max", "14 Pro Max"]},
     {"standard_name": "iPhone 14 Pro", "aliases": ["iPhone 14 Pro", "14 Pro"]},
-    {"standard_name": "iPhone 14", "aliases": ["iPhone 14", "14"]},
+    {"standard_name": "iPhone 14", "aliases": ["iPhone 14"]},
 ]
 
 

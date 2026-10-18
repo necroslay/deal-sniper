@@ -95,6 +95,29 @@ class TestProductRegistry:
         duplicates = [n for n in names if names.count(n) > 1]
         assert duplicates == [], f"Duplicate standard names: {set(duplicates)}"
 
+    def test_no_short_bare_numeric_alias(self):
+        """A short bare number matches unrelated titles.
+
+        The registry once carried ``"15"`` and ``"14"`` for the iPhones, so
+        "Dell XPS 15", "iMac 2015" and "ThinkCentre M715q" all resolved to an
+        iPhone. A numeric-only alias must be long enough to be a model number
+        (4090, 3080, ...) rather than a size, year or product code.
+        """
+        offenders = [
+            f"{entry['standard_name']}: {alias!r}"
+            for entry in PRODUCT_REGISTRY
+            for alias in entry["aliases"]
+            if alias.isdigit() and len(alias) < 4
+        ]
+        assert offenders == [], (
+            "Bare numeric aliases too short to be identifiers:\n  "
+            + "\n  ".join(offenders))
+
+    def test_iphone_aliases_do_not_match_common_numbers(self):
+        assert resolve_product("Dell XPS 15 7590 Laptop").standard_name == \
+            "Dell XPS 15 7590 Laptop"
+        assert resolve_product("iMac 2015 4K Retina").category == "unknown"
+
     def test_every_standard_name_resolves_to_itself(self):
         """Registry ordering invariant.
 

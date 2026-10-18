@@ -1,6 +1,36 @@
 # Kijiji GPU Scraper
 
-Scrapes high-end GPU listings from Kijiji GTA (Toronto) using **free methods** — no Apify, no paid APIs.
+Scrapes GPU and PC-part listings from Kijiji across **all of Canada** (configurable
+scope) using **free methods** — no Apify, no paid APIs.
+
+## Search scope
+
+The geographic scope lives in `config.yaml` under `search` and the URL is built
+from it, so changing scope is a config edit rather than a code edit:
+
+```yaml
+search:
+  region: "canada"      # or "gta-greater-toronto-area", "ontario", ...
+  location_id: "0"      # "0" = every location in the region;
+                        # "1700272" = Toronto/GTA
+```
+
+Verified reach for the `graphics-card` term:
+
+| Scope | Available listings |
+|---|---|
+| `canada` / `0` (all locations) | ~1,430 |
+| `ontario` / `9004` | ~925 |
+| `gta-greater-toronto-area` / `1700272` | ~602 |
+
+> **Do not blank `location_id`.** Dropping the trailing `l` segment
+> (`/b-canada/graphics-card/k0`) does *not* widen the search — Kijiji serves a
+> generic browse instead, and a GPU query comes back with cars, jewellery and
+> magazines while still reporting thousands of hits. The code coerces an empty
+> value to `0` so this can't happen silently.
+>
+> Because scope is now national, **pagination depth is what caps the corpus** —
+> raise `max_listings` to harvest more (pages = `max_listings / listings_per_page`).
 
 ## How It Works
 

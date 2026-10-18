@@ -1,11 +1,12 @@
 """Guards against listings the resolver mis-identifies as a product.
 
 ``resolve_product`` matches canonical aliases as bare substrings, so any listing
-that merely *mentions* a product resolves to that product and is then valued as if
-it were the product itself. That produced alerts like a $20 GPU power **cable**
-"worth" $1,893 because its title listed the cards it fits.
+that merely *mentions* a product resolves to that product. In the archived
+valuation engine that produced alerts like a $20 GPU power **cable** "worth"
+$1,893 because its title listed the cards it fits; here it would simply fill the
+viewer with accessories filed under a product they aren't.
 
-Three distinct failure modes are rejected here, before any valuation happens:
+Four distinct failure modes are rejected, before a listing is stored/grouped:
 
 * ``accessory_or_part`` — the item is an accessory/part (a cable, dock, cooler).
 * ``platform_accessory`` — "X for PS5"; something made *for* the platform.
@@ -79,3 +80,28 @@ def assess_listing(title: str, product: Optional[CanonicalProduct] = None) -> Op
         return "multi_item_lot"
 
     return None
+
+
+# Feature order is part of the ML contract: ``RuleFeatures`` (app/ml/guard_model)
+# emits columns in exactly this order.
+RULE_SIGNAL_NAMES = (
+    "accessory", "platform", "host", "product_count", "n_words", "n_chars",
+)
+
+
+def rule_signals(title: str) -> dict[str, float]:
+    """Expose the guard's raw pattern hits as numeric features.
+
+    The learned guard is built *on top of* the rules rather than instead of
+    them: these signals let the classifier reuse the hand-written patterns it
+    already trusts while learning the cases they miss.
+    """
+    title = title or ""
+    return {
+        "accessory": float(bool(ACCESSORY_PATTERNS.search(title))),
+        "platform": float(bool(_COMPAT_PATTERNS.search(title))),
+        "host": float(bool(_HOST_PATTERNS.search(title))),
+        "product_count": float(len(find_products(title))),
+        "n_words": float(len(title.split())),
+        "n_chars": float(len(title)),
+    }

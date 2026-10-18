@@ -174,6 +174,21 @@ class Store:
         self._conn.commit()
         return False
 
+    def update_enrichment(self, listing_id: str, product_key: Optional[str],
+                          flag_reason: Optional[str]) -> None:
+        """Overwrite one listing's ``product_key`` / ``flag_reason``.
+
+        Those two columns are written once, at scrape time, by whatever resolver
+        and guard existed then — so a resolver fix does **not** reach rows already
+        stored. This is the write path for ``app.re_resolve``, which brings them
+        up to date without re-scraping.
+        """
+        self._check()
+        self._cur.execute(
+            "UPDATE raw_listings SET product_key = ?, flag_reason = ? "
+            "WHERE id = ?", (product_key, flag_reason, listing_id))
+        self._conn.commit()
+
     # ── scrape coverage ─────────────────────────────────────────────────────
 
     def previous_coverage(self, source: str) -> Optional[int]:

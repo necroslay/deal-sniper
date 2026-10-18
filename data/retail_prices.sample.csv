@@ -1,0 +1,5 @@
+product,price_cad,observed_at
+# EXAMPLE FILE — copy to data/retail_prices.csv and replace with real prices you
+# have verified. These two rows are illustrative placeholders, not quotes.
+RTX 5080,1499,2026-09-01
+RTX 4090,2199,2026-09-01

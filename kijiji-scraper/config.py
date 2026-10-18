@@ -32,7 +32,18 @@ except ImportError:
 @dataclass
 class SearchConfig:
     base_url: str = "https://www.kijiji.ca"
-    url_template: str = "https://www.kijiji.ca/b-gta-greater-toronto-area/{search_term}/k0l1700272?page={page}"
+    # Geographic scope. region + location_id build the search URL directly, so
+    # changing scope is a config edit rather than a code edit:
+    #   region="canada", location_id="0"  -> all of Canada (~1,430 hits for
+    #       "graphics-card" vs ~600 for the GTA), and the titles are on-topic.
+    #   region="gta-greater-toronto-area", location_id="1700272" -> GTA only.
+    #
+    # The location segment is ALWAYS emitted. Omitting it ("k0") does not scope
+    # a search at all -- Kijiji serves a generic browse and a GPU query comes
+    # back with cars, jewellery and magazines while still reporting a large
+    # hit count. `l0` means "every location in the region".
+    region: str = "canada"
+    location_id: str = "0"
     default_search_term: str = "graphics-card"
     search_terms: list[str] = field(default_factory=lambda: [
         "graphics-card", "gpu", "video-card",
@@ -40,6 +51,24 @@ class SearchConfig:
     listings_per_page: int = 40
     max_listings: int = 200
     default_pages: int = 5
+
+    def search_path(self, search_term: str, page: int = 1) -> str:
+        """URL path (no host) for *search_term* at page *page*.
+
+        Kijiji encodes pagination in the path (`/page-N/`), and the trailing
+        ``k0`` is the category filter; ``l<id>`` narrows to a location, and
+        omitting it searches every location.
+        """
+        # `l0` = every location in the region. Never drop the segment: without
+        # it Kijiji returns an unscoped browse rather than search results.
+        category = f"k0l{self.location_id or '0'}"
+        if page <= 1:
+            return f"/b-{self.region}/{search_term}/{category}"
+        return f"/b-{self.region}/{search_term}/page-{page}/{category}"
+
+    def search_url(self, search_term: str, page: int = 1) -> str:
+        """Absolute search URL for *search_term* at page *page*."""
+        return f"{self.base_url}{self.search_path(search_term, page)}"
 
 
 @dataclass

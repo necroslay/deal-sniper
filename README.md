@@ -1,10 +1,18 @@
 # Deal Sniper — scraper + viewer
 
-Scrapes second-hand computer parts from **Kijiji** and **Craigslist** (GTA), stores
-them in SQLite, and shows them in a Streamlit dashboard so you can browse and
-decide what's worth chasing.
+Scrapes second-hand computer parts from **Kijiji** (Canada-wide) and
+**Craigslist** (GTA), stores them in SQLite, and shows them in a Streamlit
+dashboard so you can browse and decide what's worth chasing.
 
 Deliberately small: **scrape → look → decide**. No pricing model in the loop.
+
+On top of that sits an **opt-in ML layer** — a resolver, a listing guard and a
+quantile price model, consulted *only* where the deterministic rules abstain,
+wired to a real evaluation harness with a CI regression gate. See
+[Machine learning layer](#machine-learning-layer-opt-in),
+[`PROJECT_STATUS.md`](PROJECT_STATUS.md) for an honest works-vs-doesn't map, and
+[`INTERVIEW_PREP.md`](INTERVIEW_PREP.md) for the decisions, numbers and a
+stage-by-stage trace of one listing.
 
 > The full comp-driven valuation engine (203 tests, FMV/ERV maths, deal scoring,
 > alert gate, lifecycle inference, retail anchoring) is preserved at git tag
@@ -102,6 +110,66 @@ crashing scrape can't take the viewer down with it.
 
 So the dashboard alone is enough: **step 2 above is optional.**
 
+## Machine learning layer (opt-in)
+
+The deterministic engine is the product; the ML layer is a *measured*
+enhancement on top of it, not a replacement. It is **off by default** — the
+scraper and viewer run with no ML dependencies installed.
+
+```bash
+pip install -r app/requirements-ml.txt     # scikit-learn + friends
+
+# 1. Build a labeling sheet from what you scraped.
+#    --queue exports only the rows the rules are least sure about.
+#    (*.local.csv is gitignored; the committed set is data/labels/deals.csv)
+python -m app.ml.dataset --export data/labels/deals.local.csv --queue
+
+# 2. Fill in the product_label / guard_label columns, then measure.
+python -m app.eval.harness --task resolver
+python -m app.eval.harness --task guard
+
+#    The price model is scored on a temporal split instead, straight from the
+#    scraped database (no labels needed).
+python -m app.eval.price_harness
+
+# 3. Train and persist the models the pipeline will use.
+python -m app.ml.train --task resolver
+python -m app.ml.train --task guard
+```
+
+Then set `CFG.ml.enabled = True` and the ingestion path uses them automatically.
+
+What it adds, and why it is built this way:
+
+- **Product resolver** — a TF-IDF (word + char n-gram) linear model. On the real
+  labeled set it **beats the regex rules** (0.871 vs 0.844 macro F1, 0.867 vs
+  0.733 accuracy). The *rules-first hybrid* cannot capture that, though: it only
+  rewrites titles the rules abstain on, while the model's wins are on titles the
+  rules resolve confidently and wrongly. So the standalone model is the upside
+  and the hybrid stays conservative — see [`reports/README.md`](reports/README.md).
+- **Listing guard** — a binary `keep`/`reject` model that consumes the rule
+  guard's own pattern hits *as features*, so it learns the vocabulary the
+  hand-written keyword list misses (`controller`, `carry case`, `charger`). Here
+  the hybrid wins outright: 0.849 vs 0.790 macro F1 at higher accuracy.
+- **Price model** — LightGBM **quantile regression** predicting the P25/P50/P75
+  of comparable asking prices, plus a per-product empirical-quantile baseline to
+  beat and an optional **new-retail ceiling**. Validated on a **temporal split**
+  (`date_posted`, oldest train / newest test). On today's data the simple
+  baseline wins on MAE ($284 vs $404) — the honest result, and the temporal split
+  surfaces genuine drift that a random split would have hidden. Framing is strict:
+  *underpriced relative to comparable listings*, never a value. See
+  [`reports/README.md`](reports/README.md).
+- **Evaluation harness** (`app/eval/`) — scores every predictor on a frozen,
+  leakage-safe split (splits are keyed on the normalised title, so relists and
+  cross-posts cannot leak) and writes a per-class markdown report plus a metrics
+  JSON. **CI fails the build** if macro F1 regresses.
+- **Active learning** (`app/ml/active_learning.py`) — ranks unlabeled listings by
+  how unsure the rules are, so labeling effort goes where it changes the model.
+
+Current numbers, and an honest reading of them, are in
+[`reports/README.md`](reports/README.md). The single integration seam is
+`app/engines/enrich.py`, which `store_listings` calls once per listing.
+
 ## Scraper details
 
 | Source | Method | Notes |
@@ -125,22 +193,29 @@ deal-sniper/
 ├── app/
 │   ├── scrape.py             # CLI: scrape → SQLite
 │   ├── dashboard.py          # Streamlit viewer
-│   ├── config.py             # scrape depth, lifecycle threshold
+│   ├── config.py             # scrape depth, lifecycle, ML paths/thresholds
 │   ├── adapters/sources.py   # marketplace adapters
-│   ├── engines/              # resolver + listing_guard
+│   ├── engines/              # resolver, listing_guard, enrich (the ML seam)
+│   ├── ml/                   # dataset, models, features, retail, training
+│   ├── eval/                 # metrics, predictors, harness, price_harness
 │   ├── models/schema.py      # RawListing
 │   ├── db/store.py           # SQLite persistence
-│   └── tests/                # 77 tests
+│   └── tests/                # 168 tests
 ├── kijiji-scraper/           # self-contained scraper project
 ├── craigslist-scraper/       # self-contained scraper project
+├── data/labels/              # hand-labeled seed data (committed)
+├── reports/                  # generated eval reports + CI baselines
+├── models/                   # trained model binaries (gitignored)
 ├── archive/engine-docs/      # the archived valuation engine's documentation
-└── requirements.txt (in app/)
+├── .github/workflows/ci.yml  # tests + the evaluation regression gate
+├── requirements.txt (in app/)
+└── requirements-ml.txt (in app/, optional)
 ```
 
 ## Tests
 
 ```bash
-cd app && python -m pytest -q      # 77 passed
+cd app && python -m pytest -q      # 231 passed
 ```
 
 Covers the store's persistence and disappearance tracking, the product resolver,
@@ -148,6 +223,13 @@ the listing guard, the scrape helpers, Craigslist listing-id parsing, and a real
 render of the dashboard via Streamlit's `AppTest` — including clicking
 **Run scrape now** and asserting it invokes the scraper CLI against the right
 database.
+
+The ML layer adds coverage for the metrics, the leakage-safe split, the
+predictors and their hybrid routing, the harness and its regression gate, the
+active-learning queue, the guard's threshold selection, and the exact
+rules-first behaviour of `enrich` when ML is disabled. The metric, dataset,
+harness and enrich tests run **without** scikit-learn; only the model tests skip
+when it is absent.
 
 ## Scope and compliance
 

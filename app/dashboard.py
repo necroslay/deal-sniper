@@ -72,7 +72,8 @@ def run_scrape(source: str, pages: int | None, db_path: str) -> tuple[int, str]:
 
 
 st.title("💰 Deal Sniper")
-st.caption("Scraped second-hand computer parts — Kijiji + Craigslist (GTA)")
+st.caption("Scraped second-hand computer parts — Kijiji (Canada-wide) + "
+           "Craigslist (GTA)")
 
 df = load_listings(DB_PATH)
 

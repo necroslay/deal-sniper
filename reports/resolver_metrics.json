@@ -1,0 +1,380 @@
+[
+  {
+    "accuracy": 0.7333333333333333,
+    "extras": {},
+    "labels": [
+      "MacBook Pro M1",
+      "OTHER",
+      "RTX 3060",
+      "RTX 4090",
+      "RX 580",
+      "RX 7900 XTX",
+      "__none__"
+    ],
+    "macro_f1": 0.8444444444444444,
+    "matrix": [
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        6,
+        1,
+        1,
+        0,
+        0,
+        11
+      ]
+    ],
+    "n": 30,
+    "per_class": {
+      "MacBook Pro M1": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 1
+      },
+      "OTHER": {
+        "f1": 0.6666666666666666,
+        "precision": 0.5,
+        "recall": 1.0,
+        "support": 6
+      },
+      "RTX 3060": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 0
+      },
+      "RTX 4090": {
+        "f1": 0.6666666666666666,
+        "precision": 0.5,
+        "recall": 1.0,
+        "support": 1
+      },
+      "RX 580": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 1
+      },
+      "RX 7900 XTX": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 2
+      },
+      "__none__": {
+        "f1": 0.7333333333333334,
+        "precision": 1.0,
+        "recall": 0.5789473684210527,
+        "support": 19
+      }
+    },
+    "predictor": "resolver-baseline",
+    "task": "resolver"
+  },
+  {
+    "accuracy": 0.8666666666666667,
+    "extras": {},
+    "labels": [
+      "MacBook Pro M1",
+      "OTHER",
+      "RTX 3080",
+      "RTX 4090",
+      "RX 580",
+      "RX 7900 XTX",
+      "__none__"
+    ],
+    "macro_f1": 0.8705627705627705,
+    "matrix": [
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        5,
+        1,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        3,
+        0,
+        0,
+        0,
+        0,
+        0,
+        16
+      ]
+    ],
+    "n": 30,
+    "per_class": {
+      "MacBook Pro M1": {
+        "f1": 0.4,
+        "precision": 0.25,
+        "recall": 1.0,
+        "support": 1
+      },
+      "OTHER": {
+        "f1": 0.9090909090909091,
+        "precision": 1.0,
+        "recall": 0.8333333333333334,
+        "support": 6
+      },
+      "RTX 3080": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 0
+      },
+      "RTX 4090": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 1
+      },
+      "RX 580": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 1
+      },
+      "RX 7900 XTX": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 2
+      },
+      "__none__": {
+        "f1": 0.9142857142857143,
+        "precision": 1.0,
+        "recall": 0.8421052631578947,
+        "support": 19
+      }
+    },
+    "predictor": "tfidf-linear",
+    "task": "resolver"
+  },
+  {
+    "accuracy": 0.7333333333333333,
+    "extras": {},
+    "labels": [
+      "MacBook Pro M1",
+      "OTHER",
+      "RTX 3060",
+      "RTX 4090",
+      "RX 580",
+      "RX 7900 XTX",
+      "__none__"
+    ],
+    "macro_f1": 0.8444444444444444,
+    "matrix": [
+      [
+        1,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        6,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        1,
+        0,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        1,
+        0,
+        0
+      ],
+      [
+        0,
+        0,
+        0,
+        0,
+        0,
+        2,
+        0
+      ],
+      [
+        0,
+        6,
+        1,
+        1,
+        0,
+        0,
+        11
+      ]
+    ],
+    "n": 30,
+    "per_class": {
+      "MacBook Pro M1": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 1
+      },
+      "OTHER": {
+        "f1": 0.6666666666666666,
+        "precision": 0.5,
+        "recall": 1.0,
+        "support": 6
+      },
+      "RTX 3060": {
+        "f1": 0.0,
+        "precision": 0.0,
+        "recall": 0.0,
+        "support": 0
+      },
+      "RTX 4090": {
+        "f1": 0.6666666666666666,
+        "precision": 0.5,
+        "recall": 1.0,
+        "support": 1
+      },
+      "RX 580": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 1
+      },
+      "RX 7900 XTX": {
+        "f1": 1.0,
+        "precision": 1.0,
+        "recall": 1.0,
+        "support": 2
+      },
+      "__none__": {
+        "f1": 0.7333333333333334,
+        "precision": 1.0,
+        "recall": 0.5789473684210527,
+        "support": 19
+      }
+    },
+    "predictor": "hybrid-resolver",
+    "task": "resolver"
+  }
+]

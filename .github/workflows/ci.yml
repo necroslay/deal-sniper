@@ -1,0 +1,55 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r app/requirements.txt
+          pip install -r app/requirements-ml.txt
+
+      - name: Unit tests
+        run: cd app && python -m pytest -q
+
+      # The evaluation harness is a gate, not just a report: these fail the
+      # build if macro F1 drops below the committed baseline in reports/.
+      - name: Resolver evaluation (regression gate)
+        run: python -m app.eval.harness --task resolver --check-baseline
+
+      - name: Guard evaluation (regression gate)
+        run: python -m app.eval.harness --task guard --check-baseline
+
+      # The price model is gated on MAE over a temporal split. It needs a
+      # populated database, so it is skipped when none is present rather than
+      # failing the build on a fresh checkout (the committed DB is scratch).
+      - name: Price evaluation (regression gate, needs a DB)
+        run: |
+          if [ -f app/listings.db ]; then
+            python -m app.eval.price_harness --check-baseline
+          else
+            echo "No app/listings.db in CI — skipping the price gate."
+          fi
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports
+          path: reports/
