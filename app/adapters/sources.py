@@ -151,3 +151,9 @@ class CraigslistAdapter(SourceAdapter):
             logger.error(f"CL error: {e}"); return []
     def fetch_detail(self, url): return None
     def check_health(self): return {"status":"ok","source":"craigslist","engine":"playwright"}
+
+
+# Importing the newer adapters registers them; they import this module's
+# SourceAdapter/register_source, so this must stay at the bottom.
+from app.adapters import ebay as _ebay  # noqa: E402,F401
+from app.adapters import reddit_chs as _reddit  # noqa: E402,F401

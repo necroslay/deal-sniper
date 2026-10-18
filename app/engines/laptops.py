@@ -33,6 +33,8 @@ _LAPTOP_WORDS = re.compile(
 # NB: "ROG Strix", "TUF Gaming" and "Nitro+" are also *graphics-card* lines, so
 # they only count as laptops when the title says laptop/notebook (above).
 
+LAPTOP_WORDS = _LAPTOP_WORDS          # public alias for the source adapters
+
 # Not a laptop: desktops that share a brand name, or things sold for a laptop.
 _NOT_A_LAPTOP = re.compile(
     r"\b(tower|desktop|all[- ]in[- ]one|aio|aurora|gaming pc|pc case|sff|"

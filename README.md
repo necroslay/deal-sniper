@@ -148,7 +148,46 @@ powershell -ExecutionPolicy Bypass -File scripts\register_daily_scrape.ps1 -Time
   dropped" flag is shown in the alert.
 - `--no-alerts` skips all of it. With no webhook configured, nothing is sent.
 
-## The dashboard
+## The scope (web UI)
+
+```bash
+python -m app.web            # opens http://127.0.0.1:8765
+```
+
+A custom, local-only interface (no framework, no build step, nothing to install
+beyond the project requirements). Every scored listing is a blip on a radar:
+
+- **Distance from centre = sniper score** (the middle is the best deal),
+  **direction = product family** (RTX 50 / 40 / 30, Radeon, gaming laptops,
+  MacBooks, ...), **colour = risk**, **size = landed cost**.
+- A ringed blip clears the alert bar; a pulsing one was first seen in the last
+  24h. A sweep line passes over the scope and blips fade like phosphor.
+- **Click a blip to lock on.** The dossier shows landed cost, a *price lens*
+  placing the listing among comparable asking prices, the resale maths, the
+  risk breakdown, price history, and who is selling.
+- **Triage** with Save / Contacted / Dismiss (remembered in the database), and
+  **copy a ready-to-send "can you ship it?" message** (add your postal code on
+  the left to fill it in).
+- **Ledger** view for a sortable table. Keyboard: `J/K` move, `Enter` opens the
+  listing, `S` `C` `D` mark, `M` copies the message, `1`/`2` switch view, `/`
+  searches, `?` lists them all.
+
+It binds to `127.0.0.1` only and refuses requests addressed to any other host.
+
+## Sources
+
+| Source | How | Notes |
+|---|---|---|
+| **Kijiji** | Internal search API | Canada-wide; reports shipping, condition, seller and price drops. Works around Cloudflare, so treat it as fragile |
+| **Craigslist** | Playwright | GTA only, pickup-only, so it rarely clears a "no travel" bar |
+| **r/CanadianHardwareSwap** | Public Atom feed | Mostly shipped, often PayPal Goods & Services (real buyer protection). Only sales of GPUs/laptops with a readable price are kept. Reddit throttles anonymous readers, so each run waits out the rate limit and gives up quietly if refused |
+| **eBay.ca** | Official Browse API | **Off until you add free keys** (see `.env.example`). Gives the actual shipping charge, seller feedback and Money Back Guarantee, so its landed-cost and risk numbers are the firmest. Not exercised against the live API yet |
+
+Sites that serve bot challenges (eBay's website, Memory Express, Newegg) are
+deliberately not scraped. Buyer protection lowers a listing's risk score; poor
+seller feedback raises it.
+
+## The dashboard (older Streamlit view)
 
 - **Header:** total listings, active, new in 24h, median price, gone (likely sold)
 - **Filters:** source, product, title keyword, price range, posted-within,

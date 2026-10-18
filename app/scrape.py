@@ -67,6 +67,7 @@ def setup_logging() -> None:
 # Search terms per source. Kijiji's search is keyword-based, so several narrow
 # terms surface more distinct listings than one broad term; Craigslist's relevant
 # listings live in the "cpd" (computer parts) category.
+OPTIONAL_SOURCES = frozenset({Platform.reddit})
 KIJIJI_QUERY = "ALL"          # sweeps the term list in kijiji-scraper/config.yaml
 CRAIGSLIST_QUERY = "graphics card"
 CRAIGSLIST_CATEGORY = "cpd"
@@ -74,11 +75,29 @@ CRAIGSLIST_CATEGORY = "cpd"
 
 def _pages_for(platform: Platform, override: int | None) -> int:
     """Pages to scrape, from the CLI override or config."""
+    if platform == Platform.ebay:
+        return 1                    # a fixed query list, not paged
     if override:
         return override
     if platform == Platform.kijiji:
         return CFG.scraper.kijiji_pages
+    if platform == Platform.reddit:
+        return CFG.scraper.reddit_pages
     return CFG.scraper.craigslist_pages
+
+
+def default_platforms() -> list[Platform]:
+    """What ``--source all`` means: every source that can run right now.
+
+    eBay needs API keys; without them it is left out rather than reported as a
+    failure on every run.
+    """
+    from app.adapters.ebay import credentials
+
+    platforms = [Platform.kijiji, Platform.craigslist, Platform.reddit]
+    if credentials() is not None:
+        platforms.append(Platform.ebay)
+    return platforms
 
 
 def scrape_source(platform: Platform, pages: int) -> list:
@@ -86,6 +105,8 @@ def scrape_source(platform: Platform, pages: int) -> list:
     adapter = get_adapter(platform)
     if platform == Platform.kijiji:
         return adapter.search(KIJIJI_QUERY, max_pages=pages, high_end_only=False)
+    if platform in (Platform.reddit, Platform.ebay):
+        return adapter.search("", max_pages=pages)
     return adapter.search(CRAIGSLIST_QUERY, max_pages=pages,
                           category=CRAIGSLIST_CATEGORY)
 
@@ -135,8 +156,10 @@ def store_listings(store: Store, listings: list) -> tuple[set, int, int, Counter
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Scrape marketplace listings into the local database.")
-    parser.add_argument("--source", choices=["kijiji", "craigslist", "all"],
-                        default="all", help="Which marketplace(s) to scrape.")
+    parser.add_argument("--source",
+                        choices=[p.value for p in Platform] + ["all"],
+                        default="all", help="Which marketplace(s) to scrape "
+                        "(all = every source that can run, see default_platforms).")
     parser.add_argument("--pages", type=int, default=None,
                         help="Pages per source (overrides config).")
     parser.add_argument("--db", default=None,
@@ -152,8 +175,8 @@ def main(argv: list[str] | None = None) -> int:
     for problem in apply_watchlist():
         print(f"  !! watchlist.yaml: {problem}")
 
-    platforms = ([Platform.kijiji, Platform.craigslist]
-                 if args.source == "all" else [Platform(args.source)])
+    platforms = (default_platforms() if args.source == "all"
+                 else [Platform(args.source)])
 
     store = Store(**({"db": args.db} if args.db else {})).connect()
     run_id = store.start_run([p.value for p in platforms])
@@ -178,6 +201,10 @@ def main(argv: list[str] | None = None) -> int:
             scraped.append(platform)
             collected.extend(found)
             pages_used[platform.value] = pages
+        elif platform in OPTIONAL_SOURCES:
+            # Reddit throttles anonymous readers hard, so an empty feed is
+            # routine and shouldn't page you every day.
+            print(f"  (no {platform.value} listings this run)")
         else:
             # A source that returns nothing is far more often a broken scraper
             # (markup or API change, block) than an empty marketplace.

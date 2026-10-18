@@ -91,6 +91,10 @@ def assess(row: dict, category: str) -> Logistics:
                                 row.get("description") or "")
     cost, stated = shipping_estimate(category, float(row.get("price_cad") or 0),
                                      row.get("description") or "")
+    # A marketplace-reported charge (eBay) beats both the text and the table.
+    reported = row.get("shipping_cad")
+    if reported is not None and reported >= 0:
+        cost, stated = float(reported), True
     return Logistics(status=status, shipping_cad=cost, shipping_stated=stated)
 
 

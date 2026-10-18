@@ -24,6 +24,9 @@ class ScraperConfig:
     # filter. Override per run with ``--pages``.
     kijiji_pages: int = 8
     craigslist_pages: int = 2
+    # r/CanadianHardwareSwap: pages of 100 newest posts. Reddit hands anonymous
+    # clients ~1 request per rate window, so each extra page costs ~40s of waiting.
+    reddit_pages: int = 2
     kijiji_delay_seconds: float = 2.0
     craigslist_delay_seconds: float = 1.5
 

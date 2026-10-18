@@ -51,6 +51,10 @@ CREATE TABLE IF NOT EXISTS scrape_runs (
     unique_listings INTEGER NOT NULL DEFAULT 0, new_listings INTEGER NOT NULL DEFAULT 0,
     newly_gone INTEGER NOT NULL DEFAULT 0, alerts_sent INTEGER NOT NULL DEFAULT 0,
     errors TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS user_marks (
+    listing_id TEXT PRIMARY KEY,
+    mark TEXT NOT NULL,
+    marked_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS alerts_sent (
     listing_id TEXT PRIMARY KEY,
     alerted_at TEXT NOT NULL,
@@ -98,6 +102,9 @@ class Store:
             ("seller_id", "TEXT NOT NULL DEFAULT ''"),
             ("seller_type", "TEXT NOT NULL DEFAULT ''"),
             ("price_drop", "INTEGER NOT NULL DEFAULT 0"),
+            ("shipping_cad", "REAL"),
+            ("seller_rating", "REAL"),
+            ("seller_reviews", "INTEGER"),
         ):
             if name not in existing:
                 self._cur.execute(
@@ -188,7 +195,10 @@ class Store:
                   getattr(listing, "payment", "") or "",
                   getattr(listing, "seller_id", "") or "",
                   getattr(listing, "seller_type", "") or "",
-                  int(bool(getattr(listing, "price_drop", False))))
+                  int(bool(getattr(listing, "price_drop", False))),
+                  getattr(listing, "shipping_cad", None),
+                  getattr(listing, "seller_rating", None),
+                  getattr(listing, "seller_reviews", None))
 
         if row is None:
             listing_pk = str(uuid.uuid4())
@@ -197,8 +207,9 @@ class Store:
                 "(id, source, source_listing_id, title, price_cad, url, location, "
                 "description, date_posted, image_urls, scraped_at, product_key, "
                 "flag_reason, first_seen_at, last_seen_at, miss_count, status, "
-                "fulfillment, condition, payment, seller_id, seller_type, price_drop) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active',?,?,?,?,?,?)",
+                "fulfillment, condition, payment, seller_id, seller_type, price_drop, "
+                "shipping_cad, seller_rating, seller_reviews) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active',?,?,?,?,?,?,?,?,?)",
                 (listing_pk, listing.source.value,
                  listing.source_listing_id, listing.title, listing.price_cad,
                  listing.url, listing.location or "", listing.description or "",
@@ -215,7 +226,8 @@ class Store:
             "status = 'active', gone_at = NULL, title = ?, price_cad = ?, "
             "description = ?, product_key = ?, flag_reason = ?, "
             "fulfillment = ?, condition = ?, payment = ?, seller_id = ?, "
-            "seller_type = ?, price_drop = ? WHERE id = ?",
+            "seller_type = ?, price_drop = ?, shipping_cad = ?, "
+            "seller_rating = ?, seller_reviews = ? WHERE id = ?",
             (now, listing.title, listing.price_cad, listing.description or "",
              product_key, flag_reason) + extras + (row["id"],))
         # Only a changed price is history; an unchanged one is just a re-sighting.
@@ -385,6 +397,32 @@ class Store:
         return self._cur.execute(
             "SELECT * FROM scrape_runs ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
+
+    # ── your own triage (saved / contacted / dismissed) ─────────────────────
+
+    MARKS = ("saved", "contacted", "dismissed")
+
+    def set_mark(self, listing_id: str, mark: Optional[str]) -> None:
+        """Remember what you decided about a listing; ``None`` clears it."""
+        self._check()
+        if mark is None:
+            self._cur.execute("DELETE FROM user_marks WHERE listing_id = ?",
+                              (listing_id,))
+        elif mark in self.MARKS:
+            self._cur.execute(
+                "INSERT INTO user_marks (listing_id, mark, marked_at) VALUES (?,?,?) "
+                "ON CONFLICT(listing_id) DO UPDATE SET mark = excluded.mark, "
+                "marked_at = excluded.marked_at",
+                (listing_id, mark, datetime.now(timezone.utc).isoformat()))
+        else:
+            raise ValueError(f"unknown mark {mark!r}")
+        self._conn.commit()
+
+    def marks(self) -> dict:
+        """``{listing_id: mark}`` for every listing you've triaged."""
+        self._check()
+        return {r["listing_id"]: r["mark"] for r in
+                self._cur.execute("SELECT listing_id, mark FROM user_marks")}
 
     # ── alert dedup ─────────────────────────────────────────────────────────
 

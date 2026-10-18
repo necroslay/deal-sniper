@@ -66,11 +66,28 @@ def assess(row: dict, price_ratio: float, shipped: bool,
         add(8, "shipping not stated - ask the seller")
 
     payment = {p.strip() for p in (row.get("payment") or "").split(",") if p.strip()}
-    if payment == {"cashaccepted"}:
+    if payment & {"ebay_protection", "paypal_gs"}:
+        # The one real mitigation for buying sight-unseen: a platform or payment
+        # method that can claw the money back.
+        score -= 15
+        reasons.append("buyer protection (%s)" % (
+            "eBay Money Back Guarantee" if "ebay_protection" in payment
+            else "PayPal Goods & Services"))
+    elif payment == {"cashaccepted"}:
         add(10, "cash-only seller, awkward to pay remotely")
     elif "cashless" in payment:
         score -= 5
         reasons.append("accepts cashless payment")
+
+    rating, reviews = row.get("seller_rating"), row.get("seller_reviews")
+    if rating is not None:
+        if rating < 95:
+            add(20, f"seller rated only {rating:.0f}%")
+        elif reviews is not None and reviews >= 100 and rating >= 98:
+            score -= 10
+            reasons.append(f"established seller ({reviews} ratings, {rating:.0f}%)")
+    if reviews is not None and reviews < 10:
+        add(15, f"seller has only {reviews} ratings")
     if price_ratio < 0.5:
         add(25, f"priced {1 - price_ratio:.0%} under comparable asks")
     elif price_ratio < 0.65:

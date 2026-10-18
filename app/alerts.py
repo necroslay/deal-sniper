@@ -25,71 +25,21 @@ from __future__ import annotations
 import logging
 import os
 import re
-from collections import Counter
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable, Optional
 
 import requests
 
 from app.config import CFG
-from app.engines import logistics, risk as risk_engine
-from app.ml.features import build_price_rows, parse_timestamp, trim_outliers
-from app.ml.price_model import ProductQuantileBaseline
+from app.market import (Deal, Market, NOT_A_BARGAIN, norm_title,  # noqa: F401
+                        resale_profit, score_market)
 
 logger = logging.getLogger("alerts")
 
 ENV_FILE = Path(__file__).resolve().parent.parent / ".env"
 _DISCORD_EMBEDS_PER_MESSAGE = 10
 _GREEN, _AMBER, _RED = 0x2ECC71, 0xF39C12, 0xE74C3C
-
-# Titles that look cheap because the item is broken or isn't just the item. The
-# rule guard doesn't cover these; an alert should never lead with a dead card.
-_NOT_A_BARGAIN = re.compile(
-    r"\b(for parts|parts only|parts|repair|broken|not working|doesn'?t work|"
-    r"defective|faulty|as[- ]is|artifacting|dead|no display|cracked|"
-    r"locked|icloud lock|activation lock|bios lock|"
-    r"combo|bundle|desktop|prebuilt|pc|wanted|looking for|iso)\b", re.IGNORECASE)
-# A GPU listing that is really a laptop is a different (and wrong) comparison.
-_LAPTOP_WORD = re.compile(r"\b(laptop|notebook)\b", re.IGNORECASE)
-
-
-@dataclass(frozen=True)
-class Deal:
-    """A listing that qualified, with the maths that qualified it."""
-
-    listing_id: str
-    title: str
-    product: str
-    category: str
-    price_cad: float
-    shipping_cad: float
-    median_cad: float
-    p25_cad: float
-    n_comps: int
-    url: str
-    source: str
-    location: str
-    fulfillment: str = "unknown"
-    shipping_stated: bool = False
-    route: str = "use"                 # use | flip | both
-    net_profit_cad: float = 0.0
-    roi: float = 0.0
-    risk_score: int = 0
-    risk_label: str = "low"
-    risk_reasons: list = field(default_factory=list)
-    condition: str = ""
-    price_drop: bool = False
-
-    @property
-    def landed_cad(self) -> float:
-        return self.price_cad + self.shipping_cad
-
-    @property
-    def discount(self) -> float:
-        """Fraction the *landed* cost is under the median, e.g. 0.3 for 30%."""
-        return 1.0 - self.landed_cad / self.median_cad
 
 
 def load_env_file(path: Path = ENV_FILE) -> None:
@@ -112,22 +62,6 @@ def webhook_url() -> Optional[str]:
     return os.environ.get(CFG.alerts.webhook_env) or None
 
 
-def resale_profit(median: float, landed: float, price: float,
-                  category: str) -> tuple[float, float]:
-    """``(net_profit, roi)`` from buying at *landed* and reselling near *median*."""
-    p = CFG.profit
-    sale = median * p.ask_to_sold
-    fees = sale * p.resale_fee_rate + p.resale_fixed_fee_cad
-    outbound = logistics.outbound_shipping(category, sale)
-    reserve = price * p.risk_reserve_rate
-    profit = sale - fees - outbound - landed - reserve
-    return profit, (profit / landed if landed > 0 else 0.0)
-
-
-def _norm_title(title: str) -> str:
-    return re.sub(r"[^a-z0-9]+", " ", (title or "").lower()).strip()
-
-
 def find_deals(rows: Iterable, already_alerted: set,
                now: Optional[datetime] = None) -> list[Deal]:
     """Pick the listings worth alerting on, best first.
@@ -137,110 +71,22 @@ def find_deals(rows: Iterable, already_alerted: set,
         already_alerted: Listing ids that have notified before.
         now: Clock override for tests.
     """
-    cfg = CFG.alerts
-    now = now or datetime.now(timezone.utc)
-    cutoff = now - timedelta(hours=cfg.max_listing_age_hours)
-
-    rows = list(rows)
-    by_id = {str(dict(r)["id"]): dict(r) for r in rows}
-    seller_counts = Counter(r["seller_id"] for r in by_id.values()
-                            if r.get("seller_id"))
-
-    # Comps: every priceable listing, with obvious nonsense prices trimmed.
-    price_rows = build_price_rows(rows)
-    comps = trim_outliers(price_rows)
-    baseline = ProductQuantileBaseline(min_rows=cfg.min_comps).fit(comps)
-    comp_counts = Counter(row.product for row in comps)
-
-    # Candidates: active, recently first seen, not alerted before.
-    candidates = []
-    for price_row in price_rows:
-        raw = by_id.get(price_row.listing_id)
-        if raw is None or price_row.listing_id in already_alerted:
-            continue
-        if raw.get("status") != "active":
-            continue
-        title = raw.get("title") or ""
-        if _NOT_A_BARGAIN.search(title):
-            continue
-        if price_row.category != "laptop" and _LAPTOP_WORD.search(title):
-            continue
-        first_seen = parse_timestamp(raw.get("first_seen_at"))
-        if first_seen is None or first_seen < cutoff:
-            continue
-        if not baseline.has_band(price_row.product):
-            continue
-        candidates.append(price_row)
-
-    if not candidates:
-        return []
-
-    low, mid, _ = baseline.predict_band(candidates)
-    deals: list[Deal] = []
-    for price_row, p25, median in zip(candidates, low, mid):
-        price = price_row.price_cad
-        raw = by_id[price_row.listing_id]
-        if median <= 0 or price < cfg.min_price_ratio * median:
-            continue                                  # scam / placeholder price
-
-        fulfil = logistics.assess(raw, price_row.category)
-        if not logistics.shippable_for_alert(fulfil.status):
-            continue
-        landed = price + fulfil.shipping_cad
-
-        if cfg.max_landed_cad and landed > cfg.max_landed_cad:
-            continue
-        name = price_row.product.lower()
-        if cfg.include and not any(s.lower() in name for s in cfg.include):
-            continue
-        if any(s.lower() in name for s in cfg.exclude):
-            continue
-
-        min_discount = (cfg.laptop_min_discount if price_row.category == "laptop"
-                        else cfg.min_discount)
-        use_route = (landed <= p25 and landed <= (1.0 - min_discount) * median)
-        profit, roi = resale_profit(median, landed, price, price_row.category)
-        flip_route = profit >= cfg.min_profit_cad and roi >= cfg.min_roi
-        if not (use_route or flip_route):
-            continue
-
-        verdict = risk_engine.assess(
-            raw, price_ratio=price / median, shipped=True,
-            seller_listing_count=seller_counts.get(raw.get("seller_id") or "", 1),
-            shipping_confirmed=fulfil.shippable)
-        if verdict.score > cfg.max_risk:
-            continue
-
-        deals.append(Deal(
-            listing_id=price_row.listing_id, title=raw.get("title") or "",
-            product=price_row.product, category=price_row.category,
-            price_cad=price, shipping_cad=fulfil.shipping_cad,
-            median_cad=float(median), p25_cad=float(p25),
-            n_comps=comp_counts.get(price_row.product, 0),
-            url=raw.get("url") or "", source=raw.get("source") or "",
-            location=raw.get("location") or "", fulfillment=fulfil.status,
-            shipping_stated=fulfil.shipping_stated,
-            route="both" if use_route and flip_route
-            else "use" if use_route else "flip",
-            net_profit_cad=profit, roi=roi, risk_score=verdict.score,
-            risk_label=verdict.label, risk_reasons=verdict.reasons,
-            condition=raw.get("condition") or "",
-            price_drop=bool(raw.get("price_drop"))))
+    market = score_market(rows, already_alerted, now)
+    by_id = market.by_id
 
     # One alert per item: a seller cross-posting the same ad in ten cities, or
     # relisting it under a new headline, would otherwise fill the channel. The
     # same seller offering the same product at the same price is the same item.
     best: dict = {}
-    for d in deals:
-        raw = by_id[d.listing_id]
-        seller = raw.get("seller_id")
+    for d in market.deals:
+        seller = by_id[d.listing_id].get("seller_id")
         key = ((seller, d.product, round(d.price_cad)) if seller
-               else (d.listing_id, _norm_title(d.title)))
+               else (d.listing_id, norm_title(d.title)))
         if key not in best or d.landed_cad < best[key].landed_cad:
             best[key] = d
     unique = sorted(best.values(),
                     key=lambda d: (d.net_profit_cad, d.discount), reverse=True)
-    return unique[:cfg.max_per_run]
+    return unique[:CFG.alerts.max_per_run]
 
 
 def _color(deal: Deal) -> int:
