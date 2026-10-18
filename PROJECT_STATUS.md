@@ -38,6 +38,15 @@ Legend: ✅ works · ⚠️ works with caveats · 🟡 partial · ❌ not built
 | New-retail ceiling | 🟡 | Wired and tested in isolation; **never exercised on real data** (no reference file) |
 | Evaluation harness + CI gate | ✅ | 3 gates (resolver, guard, price), all green |
 | Re-enrichment command | ✅ | `python -m app.re_resolve`; repaired 61 stale rows |
+| Scheduled scrape + Discord alerts | ✅ | Windows Task Scheduler daily; deals judged on landed cost; once per listing; health alert if a source dies |
+| Shipping / landed cost | ⚠️ | Kijiji reports `fulfillment` for only ~16% of ads; the rest are "ask the seller". Shipping cost is an estimate unless the seller states it |
+| Laptops | ⚠️ | Keyed by GPU / Apple chip / family+CPU+RAM bucket. Comparables are looser than GPUs, so laptops need a 30% margin |
+| Risk score | ⚠️ | Heuristic only (no buyer protection exists on Kijiji/Craigslist); unvalidated against real scam outcomes |
+| Resale profit math | ⚠️ | Uses asking prices x 0.92 as a stand-in for sold prices; no sold-price source without an eBay developer account |
+| Price history | ✅ | Price changes recorded per listing from now on |
+| r/CanadianHardwareSwap source | ✅ | Live-verified (20 sales from the newest 200 posts). Reddit rate-limits anonymous readers; a refused run is silent |
+| eBay.ca source | 🟡 | Official API adapter written against the documented response shape and covered by fixtures; **needs your developer keys and has not been run against the live API** |
+| Web UI (scope + ledger) | ✅ | `python -m app.web`; checked in the in-app browser at desktop and phone widths; no automated browser test |
 | Embedding model (Phase 1b) | ❌ | Registered stub only |
 | Craigslist multi-city sweep | ❌ | Not built |
 | Scheduled / daily scraping | ❌ | Not built — this is what a time axis needs |

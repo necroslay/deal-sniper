@@ -1,0 +1,122 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Deal Sniper</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23E7E5E0'/%3E%3Cpath d='M16 3C21 11 26 14 26 22v8H6v-8c0-8 5-11 10-19z' fill='none' stroke='%2323221F' stroke-width='1.8'/%3E%3Cpath d='M16 13v17M10 20h12' stroke='%2323221F' stroke-width='1.4'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div id="splash" class="splash" role="status" aria-live="polite">
+  <div id="splash-art"></div>
+  <p id="splash-text">Opening the doors…</p>
+</div>
+
+<header class="mast">
+  <p class="status" id="status" aria-live="polite"></p>
+  <div class="mast-center">
+    <div class="facade-wrap" id="facade" aria-hidden="true"></div>
+    <h1>Deal Sniper</h1>
+  </div>
+  <nav class="controls" aria-label="View">
+    <div class="seg" role="tablist">
+      <button role="tab" id="tab-scope" aria-selected="true" aria-checked="true" data-view="scope">Rose window</button>
+      <button role="tab" id="tab-ledger" aria-selected="false" aria-checked="false" data-view="ledger">Ledger</button>
+    </div>
+    <button class="textbtn" id="refresh" title="Re-score with the latest data">Refresh</button>
+    <button class="textbtn" id="theme" title="Switch light and dark" aria-label="Switch light and dark">Dusk</button>
+    <button class="textbtn" id="help" title="Keyboard shortcuts" aria-label="Keyboard shortcuts">Keys</button>
+  </nav>
+</header>
+
+<main class="layout" id="layout">
+  <aside class="rail" id="rail" aria-label="Filters">
+    <div class="finders">
+      <label class="search"><span class="sr">Search</span>
+        <input id="search" type="search" placeholder="Search the listings  /" autocomplete="off">
+      </label>
+      <label class="postal"><span class="sr">Your postal code, used to fill in the note to sellers</span>
+        <input id="postal" placeholder="Your postal code, for the note" maxlength="7" autocomplete="postal-code">
+      </label>
+    </div>
+
+    <section>
+      <h2>Petals <small>product families</small></h2>
+      <div class="chips" id="sector-chips"></div>
+    </section>
+
+    <section class="sliders">
+      <h2>Limits</h2>
+      <label class="slider"><span>Most I'll pay <b id="v-landed"></b></span>
+        <input type="range" id="f-landed" min="0" max="100" value="100"></label>
+      <label class="slider"><span>Risk no higher than <b id="v-risk"></b></span>
+        <input type="range" id="f-risk" min="0" max="100" value="100"></label>
+      <label class="slider"><span>Score at least <b id="v-score"></b></span>
+        <input type="range" id="f-score" min="0" max="100" value="20"></label>
+    </section>
+
+    <section>
+      <h2>Rules</h2>
+      <label class="check"><input type="checkbox" id="t-qualify"><i></i><span>Only those that clear the bar</span><b id="n-qualify"></b></label>
+      <label class="check"><input type="checkbox" id="t-ship" checked><i></i><span>Hide pickup-only</span></label>
+      <label class="check"><input type="checkbox" id="t-dismissed" checked><i></i><span>Hide dismissed</span></label>
+      <label class="check"><input type="checkbox" id="t-suspicious"><i></i><span>Show suspiciously cheap</span></label>
+    </section>
+
+    <section>
+      <h2>Sources</h2>
+      <div class="chips" id="source-chips"></div>
+    </section>
+
+    <section>
+      <h2>Your marks</h2>
+      <div class="chips" id="mark-chips"></div>
+    </section>
+  </aside>
+
+  <section class="stage" id="stage" aria-label="Listings">
+    <div class="scope-wrap" id="scope-wrap">
+      <svg id="scope" viewBox="-120 -50 1240 1100" role="img" aria-label="A rose window of scored listings. Closer to the centre is a better deal."></svg>
+      <div class="readout" id="readout" aria-hidden="true"></div>
+      <div class="tip" id="tip" role="tooltip" hidden></div>
+      <div class="legend" aria-hidden="true" id="legend"></div>
+      <div class="empty" id="scope-empty" hidden>
+        <div id="empty-cat"></div>
+        <p>Nothing in range.</p>
+        <button class="ghost" id="reset-filters">Clear the limits</button>
+      </div>
+    </div>
+    <div class="ledger-wrap" id="ledger-wrap" hidden>
+      <table class="ledger" id="ledger"></table>
+    </div>
+  </section>
+
+  <aside class="dossier" id="dossier" aria-label="Chosen listing" aria-live="polite"></aside>
+</main>
+
+<div class="toast" id="toast" role="status" hidden></div>
+
+<dialog id="help-dialog">
+  <h2>Keys</h2>
+  <dl>
+    <dt>J / K &nbsp;or&nbsp; ← →</dt><dd>next / previous</dd>
+    <dt>Enter</dt><dd>open the listing</dd>
+    <dt>S</dt><dd>save</dd>
+    <dt>C</dt><dd>mark contacted</dd>
+    <dt>D</dt><dd>dismiss</dd>
+    <dt>M</dt><dd>copy the “can you ship it?” note</dd>
+    <dt>1 / 2</dt><dd>rose window / ledger</dd>
+    <dt>/</dt><dd>search</dd>
+    <dt>Esc</dt><dd>let go</dd>
+  </dl>
+  <form method="dialog"><button class="ghost">Close</button></form>
+</dialog>
+
+<script type="module" src="/app.js"></script>
+</body>
+</html>

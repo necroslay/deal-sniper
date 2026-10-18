@@ -75,6 +75,10 @@ class ProductQuantileBaseline:
             band[:, column] = [values[0], values[len(values) // 2], values[-1]]
         return band[0], band[1], band[2]
 
+    def has_band(self, product: str) -> bool:
+        """True if *product* had enough comps for its own band (no global fallback)."""
+        return product in self._by_product
+
     @property
     def products_covered(self) -> int:
         """How many products had enough comps for their own band."""

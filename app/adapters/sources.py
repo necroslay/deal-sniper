@@ -104,6 +104,12 @@ class KijijiAdapter(SourceAdapter):
                 title=l.title, price_cad=l.price_cad, url=l.url,
                 location=l.location, description=l.description,
                 date_posted=l.date_posted, image_urls=l.image_urls,
+                fulfillment=getattr(l, "fulfillment", ""),
+                condition=getattr(l, "condition", ""),
+                payment=getattr(l, "payment", ""),
+                seller_id=getattr(l, "seller_id", ""),
+                seller_type=getattr(l, "seller_type", ""),
+                price_drop=getattr(l, "price_drop", False),
                 scraped_at=l.scraped_at) for l in listings]
         except Exception as e:
             logger.error(f"Kijiji error: {e}"); return []
@@ -139,8 +145,15 @@ class CraigslistAdapter(SourceAdapter):
                 title=l.title, price_cad=l.price_cad, url=l.url,
                 location=l.location, description=l.description,
                 date_posted=l.date_posted, image_urls=l.image_urls,
+                fulfillment="pickup",       # Craigslist is local, in-person only
                 scraped_at=l.scraped_at) for l in listings]
         except Exception as e:
             logger.error(f"CL error: {e}"); return []
     def fetch_detail(self, url): return None
     def check_health(self): return {"status":"ok","source":"craigslist","engine":"playwright"}
+
+
+# Importing the newer adapters registers them; they import this module's
+# SourceAdapter/register_source, so this must stay at the bottom.
+from app.adapters import ebay as _ebay  # noqa: E402,F401
+from app.adapters import reddit_chs as _reddit  # noqa: E402,F401

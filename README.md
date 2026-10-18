@@ -92,7 +92,106 @@ hundreds of rows into one with no error.
 > falsely retiring everything the deeper run had found. Depth is compared with the
 > **previous** run, so normal retirement resumes on the next equal-or-deeper run.
 
-## The dashboard
+## Scheduled scraping and deal alerts
+
+`python -m app.scrape` scrapes, then looks for **new listings priced well under
+comparable asking prices** and posts them to a Discord channel.
+
+```bash
+# 1. Create a Discord webhook, then put its URL in .env (gitignored)
+copy .env.example .env          # set DISCORD_WEBHOOK_URL=...
+
+# 2. Preview what would be sent, without sending or marking anything alerted
+python -m app.scrape --dry-run-alerts
+
+# 3. Run it daily on Windows (Task Scheduler; runs at next boot if the PC was off)
+powershell -ExecutionPolicy Bypass -File scripts\register_daily_scrape.ps1 -Time 08:00
+```
+
+- **Built for buying by mail.** Every deal is judged on **landed cost** (price +
+  shipping), not the sticker price. Kijiji's own `fulfillment` field says whether
+  the seller ships (only ~16% of ads state it); text like "pickup only" overrides
+  it, and explicit pickup-only listings never alert. Ads that don't say are
+  alerted as **"ask if they ship"** with extra risk. Shipping is an estimate from
+  `CFG.logistics` unless the seller states a price.
+- **What counts as a deal** (`CFG.alerts`): the product has at least 8 comparable
+  listings, and either
+  - **keep route:** landed cost is at or below their P25 *and* at least 20% under
+    the median (30% for laptops, whose comparables are looser), or
+  - **flip route:** expected resale (median x 0.92) minus marketplace fees,
+    outbound shipping, landed cost and a risk reserve clears $40 profit and 15% ROI.
+
+  Under 35% of the median is treated as a scam/placeholder, not a bargain. Titles
+  mentioning parts/repair/broken/locked, bundles or desktops are skipped. This is
+  a statement about *asking* prices of comparable listings, not market value.
+- **Risk score (0-100):** shipped sight-unseen, scam-shaped price, no/one photo,
+  short description, untraceable-payment wording, cash-only seller, a prolific
+  seller, shipping not stated. Anything at 55+ ("high") is dropped; the reasons
+  are printed in each alert so you know what to ask.
+- **Laptops and GPUs.** Laptops are keyed by what sets their price: a dedicated
+  GPU (`Laptop RTX 4060`), Apple model + chip (`MacBook Pro M2 Pro`), or family +
+  CPU class + RAM bucket (`Lenovo ThinkPad i7 16GB`). Titles that can't be placed
+  are left unresolved rather than guessed.
+- **One alert per item.** The same seller posting the same product at the same
+  price (cross-posts, relists) alerts once, keeping the cheapest.
+- **Tune without code:** copy `watchlist.example.yaml` to `watchlist.yaml`
+  (gitignored) to set product include/exclude lists, a budget ceiling, margins,
+  risk tolerance, resale fees and your real shipping rates. Typos are reported.
+- **Each listing alerts once**, and only after Discord accepted the message, so an
+  outage retries on the next run. At most 10 per run, and only listings first
+  seen in the last 72 hours, so a big backlog cannot flood the channel.
+- **Health alerts:** if a source returns nothing or fails, the same channel gets a
+  "Scrape problem" message — a silently dead scraper is the usual failure here.
+- **History:** every run is recorded in the `scrape_runs` table (counts, status,
+  errors) and logged to `logs/scrape.log`. Each listing's price changes are kept in
+  `price_history`, so price cuts are visible over time; Kijiji's own "price
+  dropped" flag is shown in the alert.
+- `--no-alerts` skips all of it. With no webhook configured, nothing is sent.
+
+## The scope (web UI)
+
+```bash
+python -m app.web            # opens http://127.0.0.1:8765
+```
+
+A custom, local-only interface (no framework, no build step, nothing to install
+beyond the project requirements), drawn in the same gothic ink-on-parchment style
+as Nelson's board: engraved hatching, pointed arches, double "tracery" borders,
+a cathedral masthead, and a light/dark theme that follows your system. Every
+scored listing is a small ink drawing in a **rose window**:
+
+- **Distance from the centre = score** (the middle is the best deal),
+  **petal = product family** (RTX 50 / 40 / 30, Radeon, gaming laptops,
+  MacBooks, ...), **engraving = risk** (open circle is safe, hatched is medium,
+  red cross-hatching is high), **size = landed cost**.
+- A double ring clears the alert bar; a rippling one was first seen in the last
+  24h. Click a petal's name to filter to it.
+- **Click a listing to circle it in ink.** The dossier, framed by a Tudor arch,
+  shows landed cost, a *price lens* placing the listing among comparable asking
+  prices, the resale maths, the risk breakdown, price history, and the seller.
+- **Triage** with Save / Contacted / Dismiss (remembered in the database), and
+  **copy a ready-to-send "can you ship it?" message** (add your postal code on
+  the left to fill it in).
+- **Ledger** view for a sortable table. Keyboard: `J/K` move, `Enter` opens the
+  listing, `S` `C` `D` mark, `M` copies the message, `1`/`2` switch view, `/`
+  searches, `?` lists them all.
+
+It binds to `127.0.0.1` only and refuses requests addressed to any other host.
+
+## Sources
+
+| Source | How | Notes |
+|---|---|---|
+| **Kijiji** | Internal search API | Canada-wide; reports shipping, condition, seller and price drops. Works around Cloudflare, so treat it as fragile |
+| **Craigslist** | Playwright | GTA only, pickup-only, so it rarely clears a "no travel" bar |
+| **r/CanadianHardwareSwap** | Public Atom feed | Mostly shipped, often PayPal Goods & Services (real buyer protection). Only sales of GPUs/laptops with a readable price are kept. Reddit throttles anonymous readers, so each run waits out the rate limit and gives up quietly if refused |
+| **eBay.ca** | Official Browse API | **Off until you add free keys** (see `.env.example`). Gives the actual shipping charge, seller feedback and Money Back Guarantee, so its landed-cost and risk numbers are the firmest. Not exercised against the live API yet |
+
+Sites that serve bot challenges (eBay's website, Memory Express, Newegg) are
+deliberately not scraped. Buyer protection lowers a listing's risk score; poor
+seller feedback raises it.
+
+## The dashboard (older Streamlit view)
 
 - **Header:** total listings, active, new in 24h, median price, gone (likely sold)
 - **Filters:** source, product, title keyword, price range, posted-within,
@@ -237,4 +336,5 @@ when it is absent.
 
 **Out of scope by design:** autonomous purchasing, seller messaging, marketplace
 account automation, and credential-gated sources.
+
 

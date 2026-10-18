@@ -36,6 +36,23 @@ search:
     - "rtx-3060"
     - "rx-7900"
     - "radeon"
+    - "rtx-4080"
+    - "rtx-4070"
+    - "rtx-4060"
+    - "rtx-3090"
+    - "rtx-3060-ti"
+    - "rtx-5080"
+    - "rtx-5090"
+    - "rx-6800"
+    - "gtx-1080"
+    # Laptops (priced by family/CPU/GPU in app/engines/laptops.py)
+    - "gaming-laptop"
+    - "rtx-laptop"
+    - "macbook"
+    - "thinkpad"
+    - "xps"
+    - "zenbook"
+    - "razer-blade"
   # Max listings per page (Kijiji caps this server-side at 40)
   listings_per_page: 40
   # Target total listings to scrape per search term

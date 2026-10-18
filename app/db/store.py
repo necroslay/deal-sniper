@@ -35,10 +35,30 @@ SQL = """CREATE TABLE IF NOT EXISTS raw_listings (
     miss_count INTEGER NOT NULL DEFAULT 0,
     status TEXT NOT NULL DEFAULT 'active', gone_at TEXT,
     UNIQUE(source, source_listing_id));
+CREATE TABLE IF NOT EXISTS price_history (
+    listing_id TEXT NOT NULL,
+    price_cad REAL NOT NULL,
+    seen_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS scrape_coverage (
     source TEXT PRIMARY KEY,
     pages INTEGER NOT NULL,
-    observed_at TEXT NOT NULL);"""
+    observed_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS scrape_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    started_at TEXT NOT NULL, finished_at TEXT,
+    status TEXT NOT NULL DEFAULT 'running',
+    sources TEXT NOT NULL DEFAULT '', collected INTEGER NOT NULL DEFAULT 0,
+    unique_listings INTEGER NOT NULL DEFAULT 0, new_listings INTEGER NOT NULL DEFAULT 0,
+    newly_gone INTEGER NOT NULL DEFAULT 0, alerts_sent INTEGER NOT NULL DEFAULT 0,
+    errors TEXT NOT NULL DEFAULT '');
+CREATE TABLE IF NOT EXISTS user_marks (
+    listing_id TEXT PRIMARY KEY,
+    mark TEXT NOT NULL,
+    marked_at TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS alerts_sent (
+    listing_id TEXT PRIMARY KEY,
+    alerted_at TEXT NOT NULL,
+    price_cad REAL NOT NULL);"""
 
 
 class Store:
@@ -76,6 +96,15 @@ class Store:
             ("miss_count", "INTEGER NOT NULL DEFAULT 0"),
             ("status", "TEXT NOT NULL DEFAULT 'active'"),
             ("gone_at", "TEXT"),
+            ("fulfillment", "TEXT NOT NULL DEFAULT ''"),
+            ("condition", "TEXT NOT NULL DEFAULT ''"),
+            ("payment", "TEXT NOT NULL DEFAULT ''"),
+            ("seller_id", "TEXT NOT NULL DEFAULT ''"),
+            ("seller_type", "TEXT NOT NULL DEFAULT ''"),
+            ("price_drop", "INTEGER NOT NULL DEFAULT 0"),
+            ("shipping_cad", "REAL"),
+            ("seller_rating", "REAL"),
+            ("seller_reviews", "INTEGER"),
         ):
             if name not in existing:
                 self._cur.execute(
@@ -88,6 +117,13 @@ class Store:
         self._cur.execute(
             "UPDATE raw_listings SET last_seen_at = scraped_at "
             "WHERE last_seen_at IS NULL")
+        # Seed price history for rows stored before it existed, so a later price
+        # change has an earlier point to compare against.
+        self._cur.execute(
+            "INSERT INTO price_history (listing_id, price_cad, seen_at) "
+            "SELECT id, price_cad, COALESCE(first_seen_at, scraped_at) "
+            "FROM raw_listings WHERE id NOT IN "
+            "(SELECT DISTINCT listing_id FROM price_history)")
         # Indexes are created here, not in SQL above: on a legacy database the
         # columns they reference do not exist until this migration has run.
         self._cur.execute(
@@ -96,6 +132,9 @@ class Store:
         self._cur.execute(
             "CREATE INDEX IF NOT EXISTS idx_listings_product "
             "ON raw_listings(product_key)")
+        self._cur.execute(
+            "CREATE INDEX IF NOT EXISTS idx_price_history_listing "
+            "ON price_history(listing_id)")
         self._conn.commit()
 
     def close(self) -> None:
@@ -147,32 +186,64 @@ class Store:
 
         now = observed_at or datetime.now(timezone.utc).isoformat()
         row = self._cur.execute(
-            "SELECT id FROM raw_listings WHERE source = ? AND source_listing_id = ?",
+            "SELECT id, price_cad FROM raw_listings "
+            "WHERE source = ? AND source_listing_id = ?",
             (listing.source.value, listing.source_listing_id)).fetchone()
 
+        extras = (getattr(listing, "fulfillment", "") or "",
+                  getattr(listing, "condition", "") or "",
+                  getattr(listing, "payment", "") or "",
+                  getattr(listing, "seller_id", "") or "",
+                  getattr(listing, "seller_type", "") or "",
+                  int(bool(getattr(listing, "price_drop", False))),
+                  getattr(listing, "shipping_cad", None),
+                  getattr(listing, "seller_rating", None),
+                  getattr(listing, "seller_reviews", None))
+
         if row is None:
+            listing_pk = str(uuid.uuid4())
             self._cur.execute(
                 "INSERT INTO raw_listings "
                 "(id, source, source_listing_id, title, price_cad, url, location, "
                 "description, date_posted, image_urls, scraped_at, product_key, "
-                "flag_reason, first_seen_at, last_seen_at, miss_count, status) "
-                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active')",
-                (str(uuid.uuid4()), listing.source.value,
+                "flag_reason, first_seen_at, last_seen_at, miss_count, status, "
+                "fulfillment, condition, payment, seller_id, seller_type, price_drop, "
+                "shipping_cad, seller_rating, seller_reviews) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'active',?,?,?,?,?,?,?,?,?)",
+                (listing_pk, listing.source.value,
                  listing.source_listing_id, listing.title, listing.price_cad,
                  listing.url, listing.location or "", listing.description or "",
                  listing.date_posted, json.dumps(listing.image_urls),
-                 listing.scraped_at, product_key, flag_reason, now, now))
+                 listing.scraped_at, product_key, flag_reason, now, now) + extras)
+            self._cur.execute(
+                "INSERT INTO price_history (listing_id, price_cad, seen_at) "
+                "VALUES (?,?,?)", (listing_pk, listing.price_cad, now))
             self._conn.commit()
             return True
 
         self._cur.execute(
             "UPDATE raw_listings SET last_seen_at = ?, miss_count = 0, "
             "status = 'active', gone_at = NULL, title = ?, price_cad = ?, "
-            "description = ?, product_key = ?, flag_reason = ? WHERE id = ?",
+            "description = ?, product_key = ?, flag_reason = ?, "
+            "fulfillment = ?, condition = ?, payment = ?, seller_id = ?, "
+            "seller_type = ?, price_drop = ?, shipping_cad = ?, "
+            "seller_rating = ?, seller_reviews = ? WHERE id = ?",
             (now, listing.title, listing.price_cad, listing.description or "",
-             product_key, flag_reason, row["id"]))
+             product_key, flag_reason) + extras + (row["id"],))
+        # Only a changed price is history; an unchanged one is just a re-sighting.
+        if row["price_cad"] != listing.price_cad:
+            self._cur.execute(
+                "INSERT INTO price_history (listing_id, price_cad, seen_at) "
+                "VALUES (?,?,?)", (row["id"], listing.price_cad, now))
         self._conn.commit()
         return False
+
+    def price_history(self, listing_id: str) -> list:
+        """Every recorded price for one listing, oldest first."""
+        self._check()
+        return self._cur.execute(
+            "SELECT price_cad, seen_at FROM price_history WHERE listing_id = ? "
+            "ORDER BY seen_at", (listing_id,)).fetchall()
 
     def update_enrichment(self, listing_id: str, product_key: Optional[str],
                           flag_reason: Optional[str]) -> None:
@@ -293,6 +364,81 @@ class Store:
 
         return {"missed": missed, "gone": gone,
                 "skipped_sources": skipped_sources}
+
+    # ── run history ─────────────────────────────────────────────────────────
+
+    def start_run(self, sources: list[str]) -> int:
+        """Open a ``scrape_runs`` row and return its id."""
+        self._check()
+        cur = self._cur.execute(
+            "INSERT INTO scrape_runs (started_at, sources) VALUES (?, ?)",
+            (datetime.now(timezone.utc).isoformat(), ",".join(sources)))
+        self._conn.commit()
+        return int(cur.lastrowid)
+
+    def finish_run(self, run_id: int, status: str, collected: int = 0,
+                   unique_listings: int = 0, new_listings: int = 0,
+                   newly_gone: int = 0, alerts_sent: int = 0,
+                   errors: Optional[list[str]] = None) -> None:
+        """Close a run with its outcome. *status* is ok / partial / failed."""
+        self._check()
+        self._cur.execute(
+            "UPDATE scrape_runs SET finished_at = ?, status = ?, collected = ?, "
+            "unique_listings = ?, new_listings = ?, newly_gone = ?, "
+            "alerts_sent = ?, errors = ? WHERE id = ?",
+            (datetime.now(timezone.utc).isoformat(), status, collected,
+             unique_listings, new_listings, newly_gone, alerts_sent,
+             "\n".join(errors or []), run_id))
+        self._conn.commit()
+
+    def recent_runs(self, limit: int = 10):
+        """Most recent runs first."""
+        self._check()
+        return self._cur.execute(
+            "SELECT * FROM scrape_runs ORDER BY id DESC LIMIT ?", (limit,)
+        ).fetchall()
+
+    # ── your own triage (saved / contacted / dismissed) ─────────────────────
+
+    MARKS = ("saved", "contacted", "dismissed")
+
+    def set_mark(self, listing_id: str, mark: Optional[str]) -> None:
+        """Remember what you decided about a listing; ``None`` clears it."""
+        self._check()
+        if mark is None:
+            self._cur.execute("DELETE FROM user_marks WHERE listing_id = ?",
+                              (listing_id,))
+        elif mark in self.MARKS:
+            self._cur.execute(
+                "INSERT INTO user_marks (listing_id, mark, marked_at) VALUES (?,?,?) "
+                "ON CONFLICT(listing_id) DO UPDATE SET mark = excluded.mark, "
+                "marked_at = excluded.marked_at",
+                (listing_id, mark, datetime.now(timezone.utc).isoformat()))
+        else:
+            raise ValueError(f"unknown mark {mark!r}")
+        self._conn.commit()
+
+    def marks(self) -> dict:
+        """``{listing_id: mark}`` for every listing you've triaged."""
+        self._check()
+        return {r["listing_id"]: r["mark"] for r in
+                self._cur.execute("SELECT listing_id, mark FROM user_marks")}
+
+    # ── alert dedup ─────────────────────────────────────────────────────────
+
+    def alerted_ids(self) -> set:
+        """Listing ids that have already triggered a notification."""
+        self._check()
+        return {r["listing_id"] for r in
+                self._cur.execute("SELECT listing_id FROM alerts_sent")}
+
+    def mark_alerted(self, listing_id: str, price_cad: float) -> None:
+        self._check()
+        self._cur.execute(
+            "INSERT OR IGNORE INTO alerts_sent (listing_id, alerted_at, price_cad) "
+            "VALUES (?,?,?)",
+            (listing_id, datetime.now(timezone.utc).isoformat(), float(price_cad)))
+        self._conn.commit()
 
     # ── reading ─────────────────────────────────────────────────────────────
 
