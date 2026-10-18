@@ -36,9 +36,14 @@
 
 <main class="layout" id="layout">
   <aside class="rail" id="rail" aria-label="Filters">
-    <label class="search"><span class="sr">Search</span>
-      <input id="search" type="search" placeholder="Search the listings  /" autocomplete="off">
-    </label>
+    <div class="finders">
+      <label class="search"><span class="sr">Search</span>
+        <input id="search" type="search" placeholder="Search the listings  /" autocomplete="off">
+      </label>
+      <label class="postal"><span class="sr">Your postal code, used to fill in the note to sellers</span>
+        <input id="postal" placeholder="Your postal code, for the note" maxlength="7" autocomplete="postal-code">
+      </label>
+    </div>
 
     <section>
       <h2>Petals <small>product families</small></h2>
@@ -57,7 +62,7 @@
 
     <section>
       <h2>Rules</h2>
-      <label class="check"><input type="checkbox" id="t-qualify"><i></i><span>Only those that clear the bar <b id="n-qualify"></b></span></label>
+      <label class="check"><input type="checkbox" id="t-qualify"><i></i><span>Only those that clear the bar</span><b id="n-qualify"></b></label>
       <label class="check"><input type="checkbox" id="t-ship" checked><i></i><span>Hide pickup-only</span></label>
       <label class="check"><input type="checkbox" id="t-dismissed" checked><i></i><span>Hide dismissed</span></label>
       <label class="check"><input type="checkbox" id="t-suspicious"><i></i><span>Show suspiciously cheap</span></label>
@@ -71,12 +76,6 @@
     <section>
       <h2>Your marks</h2>
       <div class="chips" id="mark-chips"></div>
-    </section>
-
-    <section class="postal">
-      <h2>Ship to</h2>
-      <label><span class="sr">Postal code</span>
-        <input id="postal" placeholder="Postal code, for the message" maxlength="7" autocomplete="postal-code"></label>
     </section>
   </aside>
 

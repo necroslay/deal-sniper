@@ -330,10 +330,9 @@ function drawGrid() {
     sv("path", { d: arch(R0 + 3, R1 - 7, 1.4), class: "arch-i" }, gGrid);
     const [x, y] = P(mid, R1 + 12), cs = Math.cos(rad(mid)), sn = Math.sin(rad(mid));
     const anchor = Math.abs(cs) < 0.25 ? "middle" : cs > 0 ? "start" : "end";
-    const lab = sv("text", { x, y: y + (sn < -0.5 ? -6 : sn > 0.5 ? 16 : 5), "text-anchor": anchor, class: "sector-label", "data-sector": name }, gGrid);
-    lab.textContent = name;
-    const cnt = sv("text", { x, y: y + (sn < -0.5 ? 10 : sn > 0.5 ? 32 : 21), "text-anchor": anchor, class: "sector-count", "data-count": name }, gGrid);
-    cnt.textContent = "";
+    const lab = sv("text", { x, y: y + (sn < -0.5 ? -6 : sn > 0.5 ? 20 : 5), "text-anchor": anchor, class: "sector-label", "data-sector": name }, gGrid);
+    sv("tspan", { class: "nm" }, lab).textContent = name;
+    sv("tspan", { class: "sector-count", dx: 8 }, lab);                // "· 16 in range", filled by renderBlips
   });
   // the hub
   sv("circle", { cx: C, cy: C, r: RMIN - 12, class: "core" }, gGrid);
@@ -376,7 +375,8 @@ function renderBlips() {
   $("#scope-empty").hidden = S.visible.length > 0;
   for (const s of S.sectors) {
     const n = S.visible.filter((d) => d.family === s).length;
-    gGrid.querySelector(`[data-count="${CSS.escape(s)}"]`)?.replaceChildren(document.createTextNode(n ? n + " in range" : ""));
+    const cnt = gGrid.querySelector(`[data-sector="${CSS.escape(s)}"] .sector-count`);
+    if (cnt) cnt.textContent = n ? String(n) : "";
     gGrid.querySelector(`[data-sector="${CSS.escape(s)}"]`)?.classList.toggle("on", S.f.sectors.has(s));
     gGrid.querySelector(`[data-petal="${CSS.escape(s)}"]`)?.classList.toggle("on", S.f.sectors.has(s));
   }
