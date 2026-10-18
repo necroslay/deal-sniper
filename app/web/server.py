@@ -1,4 +1,4 @@
-"""Serve the UI and its JSON API on localhost.
+﻿"""Serve the UI and its JSON API on localhost.
 
 Standard library only (no web framework to install), bound to 127.0.0.1 so the
 database is never exposed to the network. Run it with::
@@ -215,6 +215,14 @@ def make_handler(state: State, db: str):
     return Handler
 
 
+class Server(ThreadingHTTPServer):
+    # Windows lets a second socket bind a port that is already in use when
+    # SO_REUSEADDR is set (the default here), so a second copy would silently
+    # share the port instead of failing. Refuse, so we can pick another one.
+    allow_reuse_address = False
+    daemon_threads = True
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description="Deal Sniper local web UI.")
     parser.add_argument("--port", type=int, default=8765)
@@ -226,9 +234,18 @@ def main(argv=None) -> int:
     for problem in apply_watchlist():
         print(f"watchlist.yaml: {problem}")
     state = State(args.db)
-    server = ThreadingHTTPServer(("127.0.0.1", args.port), make_handler(state, args.db))
-    url = f"http://127.0.0.1:{args.port}"
-    print(f"Deal Sniper UI on {url}  (Ctrl+C to stop)")
+    server = None
+    for port in range(args.port, args.port + 11):        # first free port wins
+        try:
+            server = Server(("127.0.0.1", port), make_handler(state, args.db))
+            break
+        except OSError:
+            print(f"Port {port} is busy, trying the next one...", flush=True)
+    if server is None:
+        print("Couldn't find a free port. Close other copies of Deal Sniper and retry.")
+        return 1
+    url = f"http://127.0.0.1:{server.server_address[1]}"
+    print(f"Deal Sniper UI on {url}  (Ctrl+C to stop)", flush=True)
     if not args.no_open:
         threading.Timer(0.6, lambda: webbrowser.open(url)).start()
     try:
